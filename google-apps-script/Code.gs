@@ -701,18 +701,6 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
   };
 }
 
-  const sheetNames = allSheets.map(s => s.getName()).filter(n => n.trim() !== "TEM");
-
-  return {
-    success: true,
-    sheetName: targetSheet,
-    sheets: sheetNames,
-    assignee: assignee,
-    totalFound: tasks.length,
-    tasks: tasks,
-  };
-}
-
 /**
  * สร้างโฟลเดอร์ Google Drive สำหรับ TH และ INTER ตามรูปแบบมาตรฐาน
  */
