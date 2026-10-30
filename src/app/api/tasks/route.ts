@@ -173,6 +173,24 @@ export async function GET(req: NextRequest) {
 
     try {
       const data = JSON.parse(responseText);
+      if (data && data.success && Array.isArray(data.tasks)) {
+        data.tasks = data.tasks.map((t: any) => {
+          let briefLink = (t.briefLink || "").trim();
+          let briefTitle = (t.briefTitle || "").trim();
+
+          const isUrl = briefLink.startsWith("http://") || briefLink.startsWith("https://");
+          if (!isUrl && briefLink) {
+            if (!briefTitle) briefTitle = briefLink;
+            briefLink = "";
+          }
+
+          return {
+            ...t,
+            briefLink,
+            briefTitle: briefTitle || (isUrl ? "เปิดใบบรีฟ" : briefLink),
+          };
+        });
+      }
       return NextResponse.json(data);
     } catch {
       if (

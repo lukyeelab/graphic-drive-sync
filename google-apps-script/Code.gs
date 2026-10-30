@@ -137,28 +137,72 @@ function getOrCreateFolderFlexible(parentFolder, targetName, aliases) {
 }
 
 /**
+ * ดึงลิงก์และข้อความจากเซลล์ (รองรับทั้ง Formula =HYPERLINK, RichText runs, Smart Chips, และ URL ตรง)
+ */
+function extractCellLinkAndTitle(val, richText, formula) {
+  let link = "";
+  let title = (val || "").toString().trim();
+
+  // 1. ตรวจสอบจาก Formula (เช่น =HYPERLINK("https://...", "Asia PowerBall..."))
+  if (formula && typeof formula === "string" && formula.toUpperCase().indexOf("HYPERLINK") !== -1) {
+    const match = formula.match(/HYPERLINK\(\s*["']([^"']+)["']/i);
+    if (match && match[1]) {
+      link = match[1].trim();
+    }
+  }
+
+  // 2. ตรวจสอบจาก RichTextValue (LinkUrl หลัก)
+  if (!link && richText) {
+    const directUrl = richText.getLinkUrl();
+    if (directUrl) {
+      link = directUrl.trim();
+    } else {
+      // 3. ตรวจสอบจาก RichText Runs (กรณีจัดรูปแบบข้อความ หรือมีไฮเปอร์ลิงก์อยู่ในข้อความบางส่วน)
+      const runs = richText.getRuns();
+      if (runs && runs.length > 0) {
+        for (let i = 0; i < runs.length; i++) {
+          const runUrl = runs[i].getLinkUrl();
+          if (runUrl) {
+            link = runUrl.trim();
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // 4. ตรวจสอบจากข้อความตรงๆ กรณีผู้ใช้แปะ URL ลงมาตรงๆ
+  if (!link && title) {
+    if (title.startsWith("http://") || title.startsWith("https://")) {
+      link = title;
+    } else if (title.startsWith("drive.google.com") || title.startsWith("docs.google.com")) {
+      link = "https://" + title;
+    }
+  }
+
+  return { link: link, title: title };
+}
+
+/**
  * ดึง Root Folders ประจำเดือนของ TH (Col F3) และ INTER (Col G3)
  */
 function getMonthlyRootFolders(sheet) {
   const cellF3 = sheet.getRange(3, 6);
   const cellG3 = sheet.getRange(3, 7);
 
-  let thUrl = null;
-  let interUrl = null;
+  const f3Extracted = extractCellLinkAndTitle(
+    cellF3.getValue(),
+    cellF3.getRichTextValue(),
+    cellF3.getFormula()
+  );
+  const g3Extracted = extractCellLinkAndTitle(
+    cellG3.getValue(),
+    cellG3.getRichTextValue(),
+    cellG3.getFormula()
+  );
 
-  const richF3 = cellF3.getRichTextValue();
-  if (richF3 && richF3.getLinkUrl()) {
-    thUrl = richF3.getLinkUrl();
-  } else {
-    thUrl = cellF3.getValue();
-  }
-
-  const richG3 = cellG3.getRichTextValue();
-  if (richG3 && richG3.getLinkUrl()) {
-    interUrl = richG3.getLinkUrl();
-  } else {
-    interUrl = cellG3.getValue();
-  }
+  const thUrl = f3Extracted.link || f3Extracted.title;
+  const interUrl = g3Extracted.link || g3Extracted.title;
 
   const thFolderId = extractFolderId(thUrl);
   const interFolderId = extractFolderId(interUrl);
@@ -242,35 +286,46 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
     const range = sheet.getRange(1, 1, lastRow, 14);
     const values = range.getValues();
     const richTexts = range.getRichTextValues();
+    const formulas = range.getFormulas();
 
     let currentCategory = "";
     let currentBriefLink = "";
+    let currentBriefTitle = "";
 
     for (let r = CONFIG.DATA_START_ROW; r <= lastRow; r++) {
       const rowIdx = r - 1;
 
-      // Handle Category & Brief
+      // จัดการหมวดหมู่ (Col C: Merged Cell)
       const categoryCell = values[rowIdx][CONFIG.COL_CATEGORY_NAME - 1];
       if (categoryCell && categoryCell.toString().trim() !== "") {
         currentCategory = categoryCell.toString().trim();
+        // เมื่อขึ้นหมวดหมู่ใหม่ ให้รีเซ็ตใบบรีฟเดิม
+        currentBriefLink = "";
+        currentBriefTitle = "";
       }
 
-      const briefCell = values[rowIdx][CONFIG.COL_BRIEF_LINK - 1];
+      // จัดการใบบรีฟ (Col D: Merged Cell) - ตรวจสอบทั้ง Formula, RichText runs และ URL ตรง
+      const briefVal = values[rowIdx][CONFIG.COL_BRIEF_LINK - 1];
       const briefRich = richTexts[rowIdx][CONFIG.COL_BRIEF_LINK - 1];
-      if (briefRich && briefRich.getLinkUrl()) {
-        currentBriefLink = briefRich.getLinkUrl();
-      } else if (briefCell && briefCell.toString().trim() !== "") {
-        currentBriefLink = briefCell.toString().trim();
+      const briefFormula = formulas[rowIdx][CONFIG.COL_BRIEF_LINK - 1];
+      const extractedBrief = extractCellLinkAndTitle(briefVal, briefRich, briefFormula);
+
+      if (extractedBrief.link) {
+        currentBriefLink = extractedBrief.link;
+      }
+      if (extractedBrief.title) {
+        currentBriefTitle = extractedBrief.title;
       }
 
       const rowAssignee = values[rowIdx][CONFIG.COL_ASSIGNEE - 1]?.toString().trim() || "";
       const noVal = values[rowIdx][CONFIG.COL_NO - 1];
+
+      // จัดการลิงก์อัปงาน Col F (รองรับทั้ง RichText, Formula, และ Plain Text)
       const uploadCellText = values[rowIdx][CONFIG.COL_UPLOAD_LINK - 1]?.toString().trim() || "";
       const uploadRich = richTexts[rowIdx][CONFIG.COL_UPLOAD_LINK - 1];
-      let uploadUrl = "";
-      if (uploadRich && uploadRich.getLinkUrl()) {
-        uploadUrl = uploadRich.getLinkUrl();
-      }
+      const uploadFormula = formulas[rowIdx][CONFIG.COL_UPLOAD_LINK - 1];
+      const extractedUpload = extractCellLinkAndTitle(uploadCellText, uploadRich, uploadFormula);
+      const uploadUrl = extractedUpload.link;
 
       const team = values[rowIdx][CONFIG.COL_TEAM - 1]?.toString().trim() || "";
       const assignDate = values[rowIdx][CONFIG.COL_ASSIGN_DATE - 1];
@@ -289,7 +344,7 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
         }
       }
 
-      const isCompleted = status === "เสร็จสิ้น" || (uploadUrl !== "" && uploadCellText !== "");
+      const isCompleted = status.includes("เสร็จสิ้น") || (uploadUrl !== "" && uploadCellText !== "");
 
       // ถ้าเลือกเฉพาะงานที่ยังไม่เสร็จสิ้น แล้วงานนี้เสร็จแล้ว ให้ข้าม
       if (pendingOnly && isCompleted) {
@@ -303,7 +358,8 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
         sheetName: sheetName,
         row: r,
         category: currentCategory || "ทั่วไป",
-        briefLink: currentBriefLink,
+        briefLink: currentBriefLink,   // URL ของใบบรีฟ
+        briefTitle: currentBriefTitle, // ข้อความ/ชื่อใบบรีฟ
         no: noVal || 1,
         taskName: taskName, // ว่างเปล่าถ้ายังไม่ได้ใส่
         uploadUrl: uploadUrl,
