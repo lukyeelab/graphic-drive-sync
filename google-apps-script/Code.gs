@@ -1,11 +1,11 @@
 /**
- * Graphic Drive Sync - Google Apps Script Backend (v2)
+ * Graphic Drive Sync - Google Apps Script Backend (v3 - Bulletproof)
  * ---------------------------------------------------------------------
  * สคริปต์จัดการ Google Sheets & Drive Automation:
- * - ค้นหางานที่ยังไม่ได้อัปโหลดตามชื่อพนักงานข้ามทุกวัน/วันที่เลือก
- * - ดึงรายชื่อพนักงานทั้งหมดและรายชื่อวันที่ล่าสุดอัตโนมัติ
- * - สร้างโฟลเดอร์ Google Drive (TH และ INTER) โดยไม่สร้างซ้ำ
- * - นำลิงก์ TH ไปแปะลงในช่อง Link อัปไฟล์งาน (Col F-G) พร้อมเปลี่ยนสถานะเป็น "เสร็จสิ้น"
+ * 1. ดึงงานทุกแถว แม้ช่อง Link (Col F) จะว่างอยู่ก็ตาม (ไม่ข้ามแถว)
+ * 2. ค้นหาชื่อพนักงานแบบยืดหยุ่น (ตัดช่องว่าง หัว-ท้าย, ไม่สนตัวพิมพ์เล็ก-ใหญ่)
+ * 3. ดึงแท็บวันที่ทั้งหมด 50+ วัน และพนักงานทุกคนในชีต
+ * 4. สร้างโฟลเดอร์ Google Drive (TH & INTER) และแปะลิงก์ใน Col F พร้อมเปลี่ยนสถานะเป็น "เสร็จสิ้น"
  */
 
 const CONFIG = {
@@ -22,18 +22,12 @@ const CONFIG = {
   COL_RECEIVER: 14,      // Col N: ชื่อคนรับ
 };
 
-/**
- * ดึง Folder ID จาก Google Drive URL หรือ ID ตรงๆ
- */
 function extractFolderId(urlOrId) {
   if (!urlOrId) return null;
   const match = urlOrId.match(/[-\w]{25,}/);
   return match ? match[0] : urlOrId;
 }
 
-/**
- * ดึงหรือสร้างโฟลเดอร์ลูก โดยไม่สร้างซ้ำถ้ามีอยู่แล้ว
- */
 function getOrCreateSubFolder(parentFolder, folderName) {
   const cleanName = folderName.toString().trim();
   const subFolders = parentFolder.getFoldersByName(cleanName);
@@ -43,9 +37,6 @@ function getOrCreateSubFolder(parentFolder, folderName) {
   return parentFolder.createFolder(cleanName);
 }
 
-/**
- * ดึงโฟลเดอร์หลัก TH และ INTER จากแถวที่ 3 ของ Sheet นั้นๆ
- */
 function getMonthlyRootFolders(sheet) {
   const cellF3 = sheet.getRange(3, 6);
   const cellG3 = sheet.getRange(3, 7);
@@ -95,16 +86,14 @@ function getInitialMetadata() {
     if (name === "TEM") continue;
     sheetNames.push(name);
 
-    // ดึงรายชื่อพนักงานจาก Col J (เฉพาะ 10 แผ่นงานล่าสุดเพื่อความรวดเร็ว)
-    if (sheetNames.length <= 15) {
-      const lastRow = Math.min(sheet.getLastRow(), 80);
-      if (lastRow >= CONFIG.DATA_START_ROW) {
-        const assignees = sheet.getRange(CONFIG.DATA_START_ROW, CONFIG.COL_ASSIGNEE, lastRow - CONFIG.DATA_START_ROW + 1, 1).getValues();
-        for (let r = 0; r < assignees.length; r++) {
-          const val = assignees[r][0]?.toString().trim();
-          if (val && val !== "-" && val !== "ผู้รับงาน") {
-            staffSet[val] = true;
-          }
+    // ดึงรายชื่อพนักงานจาก Col J (ผู้รับงาน)
+    const lastRow = sheet.getLastRow();
+    if (lastRow >= CONFIG.DATA_START_ROW) {
+      const assignees = sheet.getRange(CONFIG.DATA_START_ROW, CONFIG.COL_ASSIGNEE, lastRow - CONFIG.DATA_START_ROW + 1, 1).getValues();
+      for (let r = 0; r < assignees.length; r++) {
+        const val = assignees[r][0]?.toString().trim();
+        if (val && val !== "-" && val !== "ผู้รับงาน" && val !== "undefined" && val.length > 0) {
+          staffSet[val] = true;
         }
       }
     }
@@ -118,25 +107,26 @@ function getInitialMetadata() {
 }
 
 /**
- * ค้นหางานตามชื่อพนักงาน:
- * - ถ้า searchAllSheets = true: วิ่งตรวจทุกแผ่นงาน (หรือ 10 แผ่นงานล่าสุด)
- * - ดึงเฉพาะงานที่ "ยังไม่ได้อัปงาน" (ช่อง Col F ว่าง หรือไม่มีลิงก์ หรือสถานะไม่ใช่ เสร็จสิ้น)
+ * อ่านงานจากแผ่นงาน โดยไม่ข้ามแถวที่ช่อง Col F ว่างอยู่!
  */
 function getStaffTasks(assignee, targetSheet, pendingOnly) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const allSheets = ss.getSheets();
 
-  // กำหนดแผ่นงานที่จะค้นหา
   let sheetsToSearch = [];
   if (targetSheet && targetSheet !== "ALL") {
     const s = ss.getSheetByName(targetSheet);
-    if (s) sheetsToSearch.push(s);
+    if (s) {
+      sheetsToSearch.push(s);
+    } else {
+      return { success: false, error: `ไม่พบแผ่นงานชื่อ: ${targetSheet}` };
+    }
   } else {
     sheetsToSearch = allSheets.filter(s => s.getName().trim() !== "TEM");
   }
 
   const tasks = [];
-  const normalizedAssignee = (assignee || "").toLowerCase().trim();
+  const searchName = (assignee || "").toLowerCase().trim();
 
   for (let sIdx = 0; sIdx < sheetsToSearch.length; sIdx++) {
     const sheet = sheetsToSearch[sIdx];
@@ -169,13 +159,6 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
       }
 
       const rowAssignee = values[rowIdx][CONFIG.COL_ASSIGNEE - 1]?.toString().trim() || "";
-      if (!rowAssignee) continue;
-
-      // กรองตามชื่อพนักงาน
-      if (normalizedAssignee && rowAssignee.toLowerCase() !== normalizedAssignee) {
-        continue;
-      }
-
       const noVal = values[rowIdx][CONFIG.COL_NO - 1];
       const uploadCellText = values[rowIdx][CONFIG.COL_UPLOAD_LINK - 1]?.toString().trim() || "";
       const uploadRich = richTexts[rowIdx][CONFIG.COL_UPLOAD_LINK - 1];
@@ -188,22 +171,38 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
       const assignDate = values[rowIdx][CONFIG.COL_ASSIGN_DATE - 1];
       const status = values[rowIdx][CONFIG.COL_STATUS - 1]?.toString().trim() || "";
 
+      // ถ้าไม่มีทั้ง No และ ผู้รับงาน และชื่องาน แปลว่าเป็นแถวคั่นว่างเปล่า
+      if (!rowAssignee && !noVal && !uploadCellText) {
+        continue;
+      }
+
+      // ตรวจสอบการตรงกันของชื่อ (Trim ช่องว่าง และเทียบทั้ง exact และ contains)
+      if (searchName && searchName !== "all") {
+        const rowNameLower = rowAssignee.toLowerCase();
+        const isMatch = rowNameLower === searchName || 
+                        rowNameLower.includes(searchName) || 
+                        searchName.includes(rowNameLower);
+        if (!isMatch) {
+          continue;
+        }
+      }
+
       const isCompleted = status === "เสร็จสิ้น" || (uploadUrl !== "" && uploadCellText !== "");
 
-      // ถ้าเลือก pendingOnly = true ให้ข้ามงานที่เสร็จแล้ว
+      // ถ้าเลือกเฉพาะงานที่ยังไม่เสร็จ แล้วงานนี้เสร็จแล้ว ให้ข้าม
       if (pendingOnly && isCompleted) {
         continue;
       }
 
-      // ถ้าช่องชื่องานว่าง ให้ตั้งชื่อแนะนำเบื้องต้น เช่น "1_สล็อต" หรือ "2_คาสิโน"
-      const taskName = uploadCellText !== "" ? uploadCellText : `${noVal || 1}_${currentCategory}_${sheetName}`;
+      // ถ้าชื่องานในช่อง F ว่าง ให้สร้างชื่องานเริ่มต้น เช่น "1_สล็อต_7 พย"
+      const taskName = uploadCellText !== "" ? uploadCellText : `${noVal || 1}_${currentCategory || "งาน"}_${sheetName}`;
 
       tasks.push({
         sheetName: sheetName,
         row: r,
-        category: currentCategory,
+        category: currentCategory || "ทั่วไป",
         briefLink: currentBriefLink,
-        no: noVal,
+        no: noVal || 1,
         taskName: taskName,
         uploadUrl: uploadUrl,
         hasUploadLink: !!uploadUrl,
@@ -216,23 +215,21 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
     }
   }
 
+  // ดึงรายชื่อชีตทั้งหมด
+  const sheetNames = allSheets.map(s => s.getName()).filter(n => n.trim() !== "TEM");
+
   return {
     success: true,
+    sheetName: targetSheet,
+    sheets: sheetNames,
     assignee: assignee,
-    targetSheet: targetSheet,
     totalFound: tasks.length,
     tasks: tasks,
   };
 }
 
 /**
- * สร้างโฟลเดอร์ Google Drive ข้ามวันและอัปเดต Google Sheets
- * payload: {
- *   tasks: [
- *     { sheetName: "7 พย", row: 4, category: "สล็อต", taskName: "1_ใหม่มาจองสวรรค์ 1000_0711" },
- *     { sheetName: "8 พย", row: 5, category: "บอล", taskName: "2_UFABET_0811" }
- *   ]
- * }
+ * สร้างโฟลเดอร์ Google Drive และอัปเดตชีต
  */
 function createFoldersAndSyncBatch(payload) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -241,7 +238,6 @@ function createFoldersAndSyncBatch(payload) {
     throw new Error("ไม่มีรายการงานที่เลือก");
   }
 
-  // จัดกลุ่มงานตาม Sheet Name (วันที่)
   const grouped = {};
   for (let i = 0; i < tasks.length; i++) {
     const item = tasks[i];
@@ -257,10 +253,7 @@ function createFoldersAndSyncBatch(payload) {
     const sheet = ss.getSheetByName(sName);
     if (!sheet) continue;
 
-    // 1. ดึง Root Folders ประจำเดือนจากแถวที่ 3 ของชีตนี้
     const { thFolder, interFolder } = getMonthlyRootFolders(sheet);
-
-    // 2. หาหรือสร้างโฟลเดอร์วันที่ใน TH และ INTER (เช่น "7 พย")
     const thDateFolder = getOrCreateSubFolder(thFolder, sName);
     const interDateFolder = interFolder ? getOrCreateSubFolder(interFolder, sName) : null;
 
@@ -271,14 +264,12 @@ function createFoldersAndSyncBatch(payload) {
       const taskName = task.taskName;
       const row = task.row;
 
-      // 3. หาหรือสร้างโฟลเดอร์หมวดหมู่ (เช่น สล็อต, บอล, คาสิโน)
       const thCatFolder = getOrCreateSubFolder(thDateFolder, category);
       let interCatFolder = null;
       if (interDateFolder) {
         interCatFolder = getOrCreateSubFolder(interDateFolder, category);
       }
 
-      // 4. สร้างโฟลเดอร์ชื่องาน ทั้ง TH และ INTER
       const thTaskFolder = getOrCreateSubFolder(thCatFolder, taskName);
       let interTaskFolder = null;
       if (interCatFolder) {
@@ -288,7 +279,7 @@ function createFoldersAndSyncBatch(payload) {
       const thUrl = thTaskFolder.getUrl();
       const interUrl = interTaskFolder ? interTaskFolder.getUrl() : "";
 
-      // 5. เขียน Link กลับเข้า Google Sheets (Col F: Link อัปไฟล์งาน)
+      // แปะลิงก์ใน Col F
       const cellF = sheet.getRange(row, CONFIG.COL_UPLOAD_LINK);
       const richValue = SpreadsheetApp.newRichTextValue()
         .setText(taskName)
@@ -296,7 +287,7 @@ function createFoldersAndSyncBatch(payload) {
         .build();
       cellF.setRichTextValue(richValue);
 
-      // 6. เปลี่ยนสถานะ Col L เป็น "เสร็จสิ้น"
+      // เปลี่ยนสถานะ Col L เป็น "เสร็จสิ้น"
       const cellL = sheet.getRange(row, CONFIG.COL_STATUS);
       cellL.setValue("เสร็จสิ้น");
 
@@ -319,7 +310,7 @@ function createFoldersAndSyncBatch(payload) {
 }
 
 /**
- * API GET Handler
+ * API GET Handler (รองรับทั้ง v1, v2, v3)
  */
 function doGet(e) {
   try {
@@ -328,10 +319,14 @@ function doGet(e) {
     let data;
     if (action === "getMetadata") {
       data = getInitialMetadata();
+    } else if (action === "getSheets") {
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      const sheetNames = ss.getSheets().map(s => s.getName()).filter(n => n.trim() !== "TEM");
+      data = { success: true, sheets: sheetNames };
     } else if (action === "getTasks") {
       const assignee = e.parameter.assignee || "";
-      const sheet = e.parameter.sheet || "ALL";
-      const pendingOnly = e.parameter.pendingOnly !== "false"; // default true
+      const sheet = e.parameter.sheet || "";
+      const pendingOnly = e.parameter.pendingOnly === "true";
       data = getStaffTasks(assignee, sheet, pendingOnly);
     } else {
       data = { success: false, error: "Invalid action" };
