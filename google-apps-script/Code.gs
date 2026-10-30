@@ -500,22 +500,43 @@ function getMonthlyRootFolders(sheet) {
     }
   }
 
-  // 3. Fallback สำคัญ: ค้นหาโฟลเดอร์ใน Google Drive โดยตรงจากชื่อของ Smart Chip
-  // เช่น ในช่อง F3 มีชิป "M11" หรือข้อความ "TH M11" -> ค้นหาโฟลเดอร์ชื่อ "M11" ใน Google Drive
-  // ในช่อง G3 มีชิป "เดือน 11" หรือข้อความ "INTER  เดือน 11" -> ค้นหาโฟลเดอร์ชื่อ "เดือน 11"
+  // 3. Fallback สำคัญ: ค้นหาโฟลเดอร์ใน Google Drive โดยตรงจากชื่อของ Smart Chip และชื่อโฟลเดอร์จริงตามเดือน
+  const dateInfo = parseDateFormats(sheetName);
+  const thDynamicNames = [
+    `ใบขาย ${dateInfo.thMonth} ${dateInfo.interMonth} ${dateInfo.thYear}`,
+    `ใบขาย ${dateInfo.thMonth}`,
+    "ใบขาย พ.ย. NOV 69",
+    `M${dateInfo.padMonth}`,
+    `TH M${dateInfo.padMonth}`,
+    "M11",
+    "TH M11",
+  ];
+  const interDynamicNames = [
+    `[${dateInfo.padMonth}] ${dateInfo.interMonth} ${dateInfo.engYear}`,
+    `${dateInfo.padMonth} ${dateInfo.interMonth} ${dateInfo.engYear}`,
+    `[${dateInfo.padMonth}] ${dateInfo.interMonth}`,
+    "[11] NOV 2026",
+    "11 NOV 2026",
+    `เดือน ${dateInfo.padMonth}`,
+    `เดือน ${parseInt(dateInfo.padMonth, 10)}`,
+    "เดือน 11",
+    "INTER  เดือน 11",
+    "INTER เดือน 11",
+  ];
+
   if (!thFolder) {
     const f3Val = sheet.getRange(3, 6).getValue()?.toString() || "";
-    thFolder = findFolderByNameSmart(f3Val, ["M11", "TH M11", "TH_M11"]);
+    thFolder = findFolderByNameSmart(f3Val, thDynamicNames);
   }
 
   if (!interFolder) {
     const g3Val = sheet.getRange(3, 7).getValue()?.toString() || "";
-    interFolder = findFolderByNameSmart(g3Val, ["เดือน 11", "INTER  เดือน 11", "INTER เดือน 11", "INTER_11"]);
+    interFolder = findFolderByNameSmart(g3Val, interDynamicNames);
   }
 
   if (!thFolder) {
     const f3Val = sheet.getRange(3, 6).getValue() || "";
-    throw new Error(`ไม่พบโฟลเดอร์ Google Drive ของ TH ในช่อง F3 (ค่าในช่องคือ "${f3Val}") กรุณาตรวจสอบว่ามีโฟลเดอร์ชื่อ M11 ใน Google Drive หรือมีสิทธิ์เข้าถึง`);
+    throw new Error(`ไม่พบโฟลเดอร์ Google Drive ของ TH ในช่อง F3 (ค่าในช่องคือ "${f3Val}") กรุณาตรวจสอบว่ามีโฟลเดอร์ชื่อ M11 หรือ ใบขาย พ.ย. NOV 69 ใน Google Drive`);
   }
 
   return { thFolder: thFolder, interFolder: interFolder };
@@ -596,6 +617,7 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
     const values = range.getValues();
     const richTexts = range.getRichTextValues();
     const formulas = range.getFormulas();
+    const notes = range.getNotes();
 
     let currentCategory = "";
     let currentBriefLink = "";
@@ -648,6 +670,14 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
       const extractedUpload = extractCellLinkAndTitle(uploadCellText, uploadRich, uploadFormula);
       const uploadUrl = extractedUpload.link;
 
+      // ดึงลิงก์ INTER จาก Note ของช่อง Col F (ถ้ามีบันทึกไว้)
+      const cellNote = (notes[rowIdx] && notes[rowIdx][CONFIG.COL_UPLOAD_LINK - 1]) || "";
+      let interFolderUrl = "";
+      const noteMatch = cellNote.match(/INTER:\s*(https:\/\/[^\s]+)/i);
+      if (noteMatch && noteMatch[1]) {
+        interFolderUrl = noteMatch[1].trim();
+      }
+
       const isCompleted = status.includes("เสร็จสิ้น") || (uploadUrl !== "" && uploadCellText !== "");
 
       // ถ้าเลือกเฉพาะงานที่ยังไม่เสร็จสิ้น แล้วงานนี้เสร็จแล้ว ให้ข้าม
@@ -679,6 +709,7 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
         no: noVal || 1,
         taskName: taskName,
         uploadUrl: uploadUrl,
+        interFolderUrl: interFolderUrl,
         hasUploadLink: !!uploadUrl,
         team: team,
         assignee: rowAssignee,
@@ -772,7 +803,13 @@ function createFoldersAndSyncBatch(payload) {
       let interUrl = "";
       if (interCatFolder) {
         const interTaskName = `${task.no || 1} (${dateInfo.interDateSuffix})`;
-        const interTaskFolder = getOrCreateFolderFlexible(interCatFolder, interTaskName, [`${task.no || 1}`]);
+        const interAliases = [
+          `${task.no || 1}`,
+          `${task.no || 1} ${dateInfo.dayNumber}.${parseInt(dateInfo.padMonth, 10)}`,
+          `${task.no || 1} ${dateInfo.interDateSuffix}`,
+          `${task.no || 1} (${dateInfo.dayNumber}.${parseInt(dateInfo.padMonth, 10)})`,
+        ];
+        const interTaskFolder = getOrCreateFolderFlexible(interCatFolder, interTaskName, interAliases);
         interUrl = interTaskFolder.getUrl();
       }
 
@@ -783,6 +820,15 @@ function createFoldersAndSyncBatch(payload) {
         .setLinkUrl(thUrl)
         .build();
       cellF.setRichTextValue(richValue);
+
+      // แนบลิงก์ INTER ไว้ใน Note ของเซลล์ Col F เพื่อให้เปิดได้ทั้งสองลิงก์เสมอ
+      if (interUrl) {
+        try {
+          cellF.setNote(`INTER: ${interUrl}`);
+        } catch (e) {
+          Logger.log(`ไม่สามารถบันทึก Note ในแถว ${row}: ${e.message}`);
+        }
+      }
 
       // 8. เปลี่ยนสถานะ Col L เป็น "เสร็จสิ้น ✅" ตามกฎ Data Validation ของชีต
       const cellL = sheet.getRange(row, CONFIG.COL_STATUS);

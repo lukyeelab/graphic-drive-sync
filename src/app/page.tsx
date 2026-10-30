@@ -34,6 +34,7 @@ interface Task {
   no: number | string;
   taskName: string;
   uploadUrl: string;
+  interFolderUrl?: string;
   hasUploadLink: boolean;
   team: string;
   assignee: string;
@@ -75,6 +76,9 @@ export default function HomePage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTaskKeys, setSelectedTaskKeys] = useState<string[]>([]);
   const [taskNamesMap, setTaskNamesMap] = useState<Record<string, string>>({});
+  const [folderLinksMap, setFolderLinksMap] = useState<
+    Record<string, { thUrl?: string; interUrl?: string }>
+  >({});
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -137,7 +141,7 @@ export default function HomePage() {
       controller.abort();
       setIsLoading(false);
       setErrorMessage("การเชื่อมต่อใช้เวลานาน กรุณากด 'ค้นหางานของฉัน' อีกครั้ง");
-    }, 60000);
+    }, 120000);
 
     try {
       const res = await fetch(
@@ -161,6 +165,8 @@ export default function HomePage() {
         // จัดการชื่องาน: ถ้าในชีตยังว่างอยู่ ให้เว้นว่างไว้ให้ผู้ใช้พิมพ์เอง
         const nameMap: Record<string, string> = {};
         const pendingKeys: string[] = [];
+        const incomingLinks: Record<string, { thUrl?: string; interUrl?: string }> = {};
+
         loadedTasks.forEach((t) => {
           const key = getTaskKey(t.sheetName, t.row);
           // ถ้าชื่องานเป็นชื่อที่ระบบตั้งอัตโนมัติ ให้เคลียร์เป็นค่าว่าง เพื่อให้ผู้ใช้พิมพ์เอง
@@ -169,9 +175,29 @@ export default function HomePage() {
           if (!t.isCompleted) {
             pendingKeys.push(key);
           }
+          if (t.uploadUrl || t.interFolderUrl) {
+            incomingLinks[key] = {
+              thUrl: t.uploadUrl || "",
+              interUrl: t.interFolderUrl || "",
+            };
+          }
         });
         setTaskNamesMap(nameMap);
         setSelectedTaskKeys(pendingKeys);
+
+        setFolderLinksMap((prev) => {
+          const merged = { ...prev };
+          for (const k in incomingLinks) {
+            merged[k] = {
+              thUrl: incomingLinks[k].thUrl || merged[k]?.thUrl || "",
+              interUrl: incomingLinks[k].interUrl || merged[k]?.interUrl || "",
+            };
+          }
+          try {
+            localStorage.setItem("gds_folder_links", JSON.stringify(merged));
+          } catch (e) {}
+          return merged;
+        });
       } else {
         setErrorMessage(data.error || "เกิดข้อผิดพลาดในการดึงข้อมูลจาก Google Sheets");
         setTasks([]);
@@ -188,6 +214,15 @@ export default function HomePage() {
   };
 
   useEffect(() => {
+    const savedLinks = localStorage.getItem("gds_folder_links");
+    if (savedLinks) {
+      try {
+        setFolderLinksMap(JSON.parse(savedLinks));
+      } catch (e) {
+        console.log("Could not parse saved folder links", e);
+      }
+    }
+
     const savedName = localStorage.getItem("gds_assignee");
     const initialName = savedName || "ลูกหยี";
     if (savedName) setAssignee(savedName);
@@ -267,6 +302,26 @@ export default function HomePage() {
       const result = await res.json();
       if (result.success) {
         setSyncResult(result);
+
+        if (result.updatedTasks && Array.isArray(result.updatedTasks)) {
+          const newLinks: Record<string, { thUrl?: string; interUrl?: string }> = {};
+          result.updatedTasks.forEach((u: any) => {
+            const key = getTaskKey(u.sheetName, u.row);
+            newLinks[key] = {
+              thUrl: u.thFolderUrl || "",
+              interUrl: u.interFolderUrl || "",
+            };
+          });
+
+          setFolderLinksMap((prev) => {
+            const merged = { ...prev, ...newLinks };
+            try {
+              localStorage.setItem("gds_folder_links", JSON.stringify(merged));
+            } catch (e) {}
+            return merged;
+          });
+        }
+
         fetchTasks(assignee, sheetName, pendingOnly);
       } else {
         alert(result.error || result.message || "เกิดข้อผิดพลาดในการสร้างโฟลเดอร์");
@@ -641,7 +696,7 @@ export default function HomePage() {
                         <th className="py-3 px-3 w-16 text-center">No.</th>
                         <th className="py-3 px-4">ชื่องาน/ชื่อโฟลเดอร์ (สำหรับสร้างโฟลเดอร์ TH)</th>
                         <th className="py-3 px-4 text-center w-28">สถานะ</th>
-                        <th className="py-3 px-4 text-right w-36">ลิงก์โฟลเดอร์</th>
+                        <th className="py-3 px-3 text-center min-w-[210px] w-56">ลิงก์โฟลเดอร์ (TH & INTER)</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-sm">
@@ -745,21 +800,48 @@ export default function HomePage() {
                                 </span>
                               )}
                             </td>
-                            <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
-                              {task.uploadUrl ? (
-                                <a
-                                  href={task.uploadUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 px-2 py-1 rounded-lg border border-emerald-200 transition-colors"
-                                >
-                                  <FolderCheck className="w-3.5 h-3.5" />
-                                  <span>เปิดโฟลเดอร์</span>
-                                  <ExternalLink className="w-3 h-3" />
-                                </a>
-                              ) : (
-                                <span className="text-xs text-slate-400 italic">รอสร้างโฟลเดอร์</span>
-                              )}
+                            <td className="py-3 px-3 text-center" onClick={(e) => e.stopPropagation()}>
+                              {(() => {
+                                const linkInfo = folderLinksMap[key];
+                                const thUrl = linkInfo?.thUrl || task.uploadUrl;
+                                const interUrl = linkInfo?.interUrl || task.interFolderUrl;
+
+                                if (!thUrl && !interUrl) {
+                                  return (
+                                    <span className="text-xs text-slate-400 italic">รอสร้างโฟลเดอร์</span>
+                                  );
+                                }
+
+                                return (
+                                  <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                                    {thUrl ? (
+                                      <a
+                                        href={thUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100/90 border border-emerald-200/90 px-2 py-1 rounded-lg transition-all shadow-2xs hover:shadow-xs group"
+                                        title="คลิกเพื่อเปิดโฟลเดอร์ Google Drive (TH)"
+                                      >
+                                        <span>🇹🇭 เปิด TH</span>
+                                        <ExternalLink className="w-3 h-3 text-emerald-500 group-hover:text-emerald-700 shrink-0" />
+                                      </a>
+                                    ) : null}
+
+                                    {interUrl ? (
+                                      <a
+                                        href={interUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1 text-[11px] font-bold text-sky-700 hover:text-sky-900 bg-sky-50 hover:bg-sky-100/90 border border-sky-200/90 px-2 py-1 rounded-lg transition-all shadow-2xs hover:shadow-xs group"
+                                        title="คลิกเพื่อเปิดโฟลเดอร์ Google Drive (INTER)"
+                                      >
+                                        <span>🌐 เปิด INTER</span>
+                                        <ExternalLink className="w-3 h-3 text-sky-500 group-hover:text-sky-700 shrink-0" />
+                                      </a>
+                                    ) : null}
+                                  </div>
+                                );
+                              })()}
                             </td>
                           </tr>
                         );
