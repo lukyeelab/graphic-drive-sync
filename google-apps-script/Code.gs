@@ -1,11 +1,20 @@
 /**
- * Graphic Drive Sync - Google Apps Script Backend (v3.1)
+ * Graphic Drive Sync - Google Apps Script Backend (v4 - Exact Folder Naming)
  * ---------------------------------------------------------------------
- * สคริปต์จัดการ Google Sheets & Drive Automation:
- * 1. ดึงงานทุกแถว แม้ช่อง Link (Col F) จะว่างอยู่ก็ตาม
- * 2. ค้นหาชื่อพนักงานเฉพาะคนที่มีชื่อจริง ไม่ดึงแถวที่ว่าง
- * 3. จำกัดการค้นหาแบบ ALL เฉพาะ 10 แผ่นงานล่าสุด เพื่อให้รวดเร็วและไม่ Timeout
- * 4. สร้างโฟลเดอร์ Google Drive (TH & INTER) และแปะลิงก์ใน Col F พร้อมเปลี่ยนสถานะเป็น "เสร็จสิ้น"
+ * รองรับการตั้งชื่อโฟลเดอร์ตามมาตรฐานจริงของบริษัท:
+ * 
+ * 🇹🇭 ฝั่ง TH:
+ *   - โฟลเดอร์วันที่: "07 พ.ย. 69" (DD พ.ย. 69)
+ *   - โฟลเดอร์หมวดหมู่: "หวย APB", "สล็อต SLOT", "คาสิโน CASINO", "บอล FOOTBALL", "มวย BOXING" ฯลฯ
+ *   - โฟลเดอร์งาน: ตั้งตามชื่องานที่พิมพ์จาก Web App (เช่น "2 หวยรอบเที่ยง แจกโชคหลักล้าน ที่ APB")
+ *   - นำลิงก์ TH ไปแปะใน Col F พร้อมเปลี่ยนสถานะ Col L เป็น "เสร็จสิ้น"
+ * 
+ * 🌐 ฝั่ง INTER:
+ *   - โฟลเดอร์วันที่: "NOV 07,2026" (MONTH DD,YYYY)
+ *   - โฟลเดอร์หมวดหมู่: "APB", "SLOT", "CASINO", "FOOTBALL", "BOXING" ฯลฯ
+ *   - โฟลเดอร์งาน: "2 (07.11)" หรือเลขงานตามวันที่
+ * 
+ * คืนค่าลิงก์ทั้งฝั่ง TH และ INTER ให้แสดงบน Web App เพื่อให้อัปโหลดงานได้ทันที
  */
 
 const CONFIG = {
@@ -22,21 +31,114 @@ const CONFIG = {
   COL_RECEIVER: 14,      // Col N: ชื่อคนรับ
 };
 
+// การแปลงหมวดหมู่งานเป็นชื่อโฟลเดอร์ของ TH และ INTER
+const CATEGORY_MAP_TH = {
+  "สล็อต": "สล็อต SLOT",
+  "เกมสล็อต": "สล็อต SLOT",
+  "คาสิโน": "คาสิโน CASINO",
+  "บอล": "บอล FOOTBALL",
+  "มวย": "มวย BOXING",
+  "ไก่ชน": "ไก่ชน COCK FIGHTING",
+  "วัวชน": "วัวชน COW FIGHTING",
+  "กีฬาอื่นๆ": "กีฬาอื่นๆ Other Sports",
+  "หวย APB": "หวย APB",
+  "UFA NEWS": "UFA NEWS",
+  "แคมเปญ": "แคมเปญ",
+  "กิจกรรมกลาง": "กิจกรรมกลาง",
+};
+
+const CATEGORY_MAP_INTER = {
+  "สล็อต": "SLOT",
+  "เกมสล็อต": "SLOT",
+  "คาสิโน": "CASINO",
+  "บอล": "FOOTBALL",
+  "มวย": "BOXING",
+  "ไก่ชน": "COCK FIGHTING",
+  "วัวชน": "COW FIGHTING",
+  "กีฬาอื่นๆ": "OTHER SPORTS",
+  "หวย APB": "APB",
+  "UFA NEWS": "UFA NEWS",
+  "แคมเปญ": "CAMPAIGN",
+  "กิจกรรมกลาง": "MAIN ACTIVITY",
+};
+
 function extractFolderId(urlOrId) {
   if (!urlOrId) return null;
   const match = urlOrId.match(/[-\w]{25,}/);
   return match ? match[0] : urlOrId;
 }
 
-function getOrCreateSubFolder(parentFolder, folderName) {
-  const cleanName = folderName.toString().trim();
-  const subFolders = parentFolder.getFoldersByName(cleanName);
-  if (subFolders.hasNext()) {
-    return subFolders.next();
+/**
+ * แปลงชื่อแผ่นงาน (เช่น "7 พย") เป็นชื่อโฟลเดอร์ TH, INTER, และรหัสวันที่
+ */
+function parseDateFormats(sheetName) {
+  const match = sheetName.trim().match(/^(\d+)\s*([^\d\s]+)?/);
+  const day = match ? parseInt(match[1], 10) : 7;
+  const padDay = day < 10 ? "0" + day : "" + day;
+  const monthStr = match && match[2] ? match[2].trim() : "พย";
+
+  let thMonth = "พ.ย.";
+  let interMonth = "NOV";
+  let numMonth = "11";
+  let thYear = "69";
+  let engYear = "2026";
+
+  if (monthStr.includes("ตค") || monthStr.includes("ต.ค.")) {
+    thMonth = "ต.ค.";
+    interMonth = "OCT";
+    numMonth = "10";
+  } else if (monthStr.includes("ธค") || monthStr.includes("ธ.ค.")) {
+    thMonth = "ธ.ค.";
+    interMonth = "DEC";
+    numMonth = "12";
   }
-  return parentFolder.createFolder(cleanName);
+
+  return {
+    dayNumber: day,
+    padDay: padDay,
+    padMonth: numMonth,
+    // ตัวอย่าง: "07 พ.ย. 69"
+    thFolderName: `${padDay} ${thMonth} ${thYear}`,
+    // ตัวอย่าง: "NOV 07,2026"
+    interFolderName: `${interMonth} ${padDay},${engYear}`,
+    // ตัวอย่าง: "07.11"
+    interDateSuffix: `${padDay}.${numMonth}`,
+  };
 }
 
+/**
+ * ดึงหรือสร้างโฟลเดอร์ โดยตรวจสอบว่ามีโฟลเดอร์ที่มีชื่อใกล้เคียงกันอยู่แล้วหรือไม่
+ */
+function getOrCreateFolderFlexible(parentFolder, targetName, aliases) {
+  const cleanTarget = targetName.trim().toLowerCase();
+  const subFolders = parentFolder.getFolders();
+  
+  // ตรวจสอบโฟลเดอร์ที่มีอยู่ก่อน
+  while (subFolders.hasNext()) {
+    const f = subFolders.next();
+    const fName = f.getName().trim().toLowerCase();
+    
+    if (fName === cleanTarget) {
+      return f;
+    }
+    
+    // ตรวจสอบชื่อทางเลือก (aliases)
+    if (aliases && Array.isArray(aliases)) {
+      for (let a = 0; a < aliases.length; a++) {
+        if (fName === aliases[a].trim().toLowerCase()) {
+          return f;
+        }
+      }
+    }
+  }
+
+  // ถ้าไม่มี ให้สร้างใหม่ตาม targetName
+  return parentFolder.createFolder(targetName.trim());
+}
+
+/**
+ * ดึง Root Folders ประจำเดือนของ TH (Col F3) และ INTER (Col G3)
+ */
 function getMonthlyRootFolders(sheet) {
   const cellF3 = sheet.getRange(3, 6);
   const cellG3 = sheet.getRange(3, 7);
@@ -72,7 +174,7 @@ function getMonthlyRootFolders(sheet) {
 }
 
 /**
- * ดึงข้อมูลเบื้องต้น: รายชื่อแท็บวันที่ทั้งหมด และรายชื่อพนักงานทุกคนที่มีในชีต
+ * ดึงรายชื่อพนักงานและแท็บวันที่ทั้งหมด
  */
 function getInitialMetadata() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -86,7 +188,6 @@ function getInitialMetadata() {
     if (name === "TEM") continue;
     sheetNames.push(name);
 
-    // ดึงรายชื่อพนักงานจาก Col J (ผู้รับงาน)
     const lastRow = sheet.getLastRow();
     if (lastRow >= CONFIG.DATA_START_ROW) {
       const assignees = sheet.getRange(CONFIG.DATA_START_ROW, CONFIG.COL_ASSIGNEE, lastRow - CONFIG.DATA_START_ROW + 1, 1).getValues();
@@ -107,7 +208,9 @@ function getInitialMetadata() {
 }
 
 /**
- * อ่านงานจากแผ่นงาน
+ * ดึงรายการงานตามชื่อพนักงาน
+ * - ถ้า Col F ว่าง ให้ taskName ส่งค่าเป็น "" (ว่างเปล่า) เพื่อให้หน้าเว็บพิมพ์เอง
+ * - แสดงเฉพาะงานที่ยังไม่เสร็จสิ้น หรือทั้งหมดตามที่เลือก
  */
 function getStaffTasks(assignee, targetSheet, pendingOnly) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -122,9 +225,9 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
       return { success: false, error: `ไม่พบแผ่นงานชื่อ: ${targetSheet}` };
     }
   } else {
-    // ถ้าค้นหา ALL ให้ค้นหาเฉพาะ 10 แท็บแรก (เช่น แท็บเดือนปัจจุบัน) เพื่อไม่ให้ติด Timeout
+    // กรณี ALL ค้นหาเฉพาะ 12 แผ่นงานแรกของเดือนปัจจุบันเพื่อความรวดเร็ว
     const validSheets = allSheets.filter(s => s.getName().trim() !== "TEM");
-    sheetsToSearch = validSheets.slice(0, 10);
+    sheetsToSearch = validSheets.slice(0, 15);
   }
 
   const tasks = [];
@@ -146,7 +249,7 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
     for (let r = CONFIG.DATA_START_ROW; r <= lastRow; r++) {
       const rowIdx = r - 1;
 
-      // Handle Category & Brief ที่ Merge Cells ไว้
+      // Handle Category & Brief
       const categoryCell = values[rowIdx][CONFIG.COL_CATEGORY_NAME - 1];
       if (categoryCell && categoryCell.toString().trim() !== "") {
         currentCategory = categoryCell.toString().trim();
@@ -173,7 +276,7 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
       const assignDate = values[rowIdx][CONFIG.COL_ASSIGN_DATE - 1];
       const status = values[rowIdx][CONFIG.COL_STATUS - 1]?.toString().trim() || "";
 
-      // ถ้าไม่มีผู้รับงาน และเรากำลังค้นหาตามชื่อ ให้ข้ามทันที
+      // ถ้าค้นหาตามชื่อ ต้องมีผู้รับงานและชื่อต้องตรงกัน
       if (searchName && searchName !== "all") {
         if (!rowAssignee || rowAssignee === "") continue;
         const rowNameLower = rowAssignee.toLowerCase();
@@ -188,13 +291,13 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
 
       const isCompleted = status === "เสร็จสิ้น" || (uploadUrl !== "" && uploadCellText !== "");
 
-      // ถ้าเลือกเฉพาะงานที่ยังไม่เสร็จ แล้วงานนี้เสร็จแล้ว ให้ข้าม
+      // ถ้าเลือกเฉพาะงานที่ยังไม่เสร็จสิ้น แล้วงานนี้เสร็จแล้ว ให้ข้าม
       if (pendingOnly && isCompleted) {
         continue;
       }
 
-      // ถ้าชื่องานในช่อง F ว่าง ให้สร้างชื่องานเริ่มต้น เช่น "2_หวย APB_7 พย"
-      const taskName = uploadCellText !== "" ? uploadCellText : `${noVal || 1}_${currentCategory || "งาน"}_${sheetName}`;
+      // ถ้า Col F ว่าง ให้ taskName เป็นค่าว่าง เพื่อให้หน้าเว็บว่างไว้สำหรับพิมพ์
+      const taskName = uploadCellText;
 
       tasks.push({
         sheetName: sheetName,
@@ -202,7 +305,7 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
         category: currentCategory || "ทั่วไป",
         briefLink: currentBriefLink,
         no: noVal || 1,
-        taskName: taskName,
+        taskName: taskName, // ว่างเปล่าถ้ายังไม่ได้ใส่
         uploadUrl: uploadUrl,
         hasUploadLink: !!uploadUrl,
         team: team,
@@ -227,7 +330,7 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
 }
 
 /**
- * สร้างโฟลเดอร์ Google Drive และอัปเดตชีต
+ * สร้างโฟลเดอร์ Google Drive สำหรับ TH และ INTER ตามรูปแบบมาตรฐาน
  */
 function createFoldersAndSyncBatch(payload) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -236,6 +339,7 @@ function createFoldersAndSyncBatch(payload) {
     throw new Error("ไม่มีรายการงานที่เลือก");
   }
 
+  // จัดกลุ่มงานตาม sheetName (วันที่)
   const grouped = {};
   for (let i = 0; i < tasks.length; i++) {
     const item = tasks[i];
@@ -251,33 +355,56 @@ function createFoldersAndSyncBatch(payload) {
     const sheet = ss.getSheetByName(sName);
     if (!sheet) continue;
 
+    // 1. ดึง Root Folders จากแถว 3
     const { thFolder, interFolder } = getMonthlyRootFolders(sheet);
-    const thDateFolder = getOrCreateSubFolder(thFolder, sName);
-    const interDateFolder = interFolder ? getOrCreateSubFolder(interFolder, sName) : null;
+
+    // 2. คำนวณชื่อโฟลเดอร์วันที่ตามมาตรฐาน (เช่น "07 พ.ย. 69" และ "NOV 07,2026")
+    const dateInfo = parseDateFormats(sName);
+
+    // สร้าง/ค้นหาโฟลเดอร์วันที่ฝั่ง TH: "07 พ.ย. 69" (หรือชื่อ "7 พย", "07 พย 69")
+    const thDateAliases = [sName, `${dateInfo.dayNumber} พ.ย. 69`, `${dateInfo.padDay} พย 69`];
+    const thDateFolder = getOrCreateFolderFlexible(thFolder, dateInfo.thFolderName, thDateAliases);
+
+    // สร้าง/ค้นหาโฟลเดอร์วันที่ฝั่ง INTER: "NOV 07,2026"
+    let interDateFolder = null;
+    if (interFolder) {
+      const interAliases = [`NOV ${dateInfo.dayNumber},2026`, `${dateInfo.padDay} NOV 2026`];
+      interDateFolder = getOrCreateFolderFlexible(interFolder, dateInfo.interFolderName, interAliases);
+    }
 
     const sheetTasks = grouped[sName];
     for (let t = 0; t < sheetTasks.length; t++) {
       const task = sheetTasks[t];
-      const category = task.category || "ทั่วไป";
-      const taskName = task.taskName;
+      const rawCategory = task.category || "ทั่วไป";
+      const taskName = task.taskName || `${task.no || 1}_${rawCategory}`;
       const row = task.row;
 
-      const thCatFolder = getOrCreateSubFolder(thDateFolder, category);
+      // 3. หมวดหมู่ฝั่ง TH (เช่น "หวย APB", "สล็อต SLOT", "คาสิโน CASINO")
+      const thCatTargetName = CATEGORY_MAP_TH[rawCategory] || rawCategory;
+      const thCatAliases = [rawCategory];
+      const thCatFolder = getOrCreateFolderFlexible(thDateFolder, thCatTargetName, thCatAliases);
+
+      // 4. หมวดหมู่ฝั่ง INTER (เช่น "APB", "SLOT", "CASINO", "FOOTBALL")
       let interCatFolder = null;
       if (interDateFolder) {
-        interCatFolder = getOrCreateSubFolder(interDateFolder, category);
+        const interCatTargetName = CATEGORY_MAP_INTER[rawCategory] || rawCategory;
+        const interCatAliases = [rawCategory];
+        interCatFolder = getOrCreateFolderFlexible(interDateFolder, interCatTargetName, interCatAliases);
       }
 
-      const thTaskFolder = getOrCreateSubFolder(thCatFolder, taskName);
-      let interTaskFolder = null;
-      if (interCatFolder) {
-        interTaskFolder = getOrCreateSubFolder(interCatFolder, taskName);
-      }
-
+      // 5. โฟลเดอร์งานฝั่ง TH: ตั้งชื่อตามชื่องาน (เช่น "2 หวยรอบเที่ยง แจกโชคหลักล้าน ที่ APB")
+      const thTaskFolder = getOrCreateFolderFlexible(thCatFolder, taskName, []);
       const thUrl = thTaskFolder.getUrl();
-      const interUrl = interTaskFolder ? interTaskFolder.getUrl() : "";
 
-      // แปะลิงก์ใน Col F
+      // 6. โฟลเดอร์งานฝั่ง INTER: "2 (07.11)" หรือตามลำดับงาน
+      let interUrl = "";
+      if (interCatFolder) {
+        const interTaskName = `${task.no || 1} (${dateInfo.interDateSuffix})`;
+        const interTaskFolder = getOrCreateFolderFlexible(interCatFolder, interTaskName, [`${task.no || 1}`]);
+        interUrl = interTaskFolder.getUrl();
+      }
+
+      // 7. เขียน Link กลับเข้า Google Sheets ใน Col F (Link อัปไฟล์งาน)
       const cellF = sheet.getRange(row, CONFIG.COL_UPLOAD_LINK);
       const richValue = SpreadsheetApp.newRichTextValue()
         .setText(taskName)
@@ -285,7 +412,7 @@ function createFoldersAndSyncBatch(payload) {
         .build();
       cellF.setRichTextValue(richValue);
 
-      // เปลี่ยนสถานะ Col L เป็น "เสร็จสิ้น"
+      // 8. เปลี่ยนสถานะ Col L เป็น "เสร็จสิ้น"
       const cellL = sheet.getRange(row, CONFIG.COL_STATUS);
       cellL.setValue("เสร็จสิ้น");
 
@@ -302,7 +429,7 @@ function createFoldersAndSyncBatch(payload) {
 
   return {
     success: true,
-    message: `สร้างโฟลเดอร์และอัปเดตชีตสำเร็จ ${results.length} รายการ`,
+    message: `สร้างโฟลเดอร์ TH & INTER และอัปเดตชีตสำเร็จ ${results.length} รายการ`,
     updatedTasks: results,
   };
 }

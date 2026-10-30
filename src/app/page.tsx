@@ -21,6 +21,8 @@ import {
   User,
   FolderSymlink,
   Edit3,
+  Globe,
+  Copy,
 } from "lucide-react";
 
 interface Task {
@@ -77,6 +79,7 @@ export default function HomePage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [showGuide, setShowGuide] = useState<boolean>(false);
+  const [copiedLink, setCopiedLink] = useState<string | null>(null);
   const [syncResult, setSyncResult] = useState<{
     success: boolean;
     message: string;
@@ -92,6 +95,12 @@ export default function HomePage() {
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const getTaskKey = (sheet: string, row: number) => `${sheet}_${row}`;
+
+  const copyToClipboard = (url: string, label: string) => {
+    navigator.clipboard.writeText(url);
+    setCopiedLink(label);
+    setTimeout(() => setCopiedLink(null), 2000);
+  };
 
   // โหลดรายชื่อพนักงานและแท็บวันที่ทั้งหมด
   const loadMetadata = async () => {
@@ -113,7 +122,6 @@ export default function HomePage() {
 
   // โหลดรายการงานตามชื่อพนักงาน
   const fetchTasks = async (targetAssignee = assignee, targetSheet = sheetName, isPending = pendingOnly) => {
-    // ยกเลิก Request ก่อนหน้าที่ยังค้างอยู่
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -127,7 +135,7 @@ export default function HomePage() {
     const timeoutId = setTimeout(() => {
       controller.abort();
       setIsLoading(false);
-      setErrorMessage("การเชื่อมต่อหมดเวลา กรุณาลองกด 'ค้นหางานของฉัน' อีกครั้ง");
+      setErrorMessage("การเชื่อมต่อใช้เวลานาน กรุณากด 'ค้นหางานของฉัน' อีกครั้ง");
     }, 60000);
 
     try {
@@ -141,7 +149,6 @@ export default function HomePage() {
 
       const data = await res.json();
       if (data.success) {
-        // กรองเฉพาะงานที่มีชื่อ assignee ตรงกันจริงๆ
         const searchLower = (targetAssignee || "").toLowerCase().trim();
         const rawTasks: Task[] = data.tasks || [];
         const loadedTasks = searchLower && searchLower !== "all"
@@ -150,11 +157,14 @@ export default function HomePage() {
 
         setTasks(loadedTasks);
 
+        // จัดการชื่องาน: ถ้าในชีตยังว่างอยู่ ให้เว้นว่างไว้ให้ผู้ใช้พิมพ์เอง
         const nameMap: Record<string, string> = {};
         const pendingKeys: string[] = [];
         loadedTasks.forEach((t) => {
           const key = getTaskKey(t.sheetName, t.row);
-          nameMap[key] = t.taskName;
+          // ถ้าชื่องานเป็นชื่อที่ระบบตั้งอัตโนมัติ ให้เคลียร์เป็นค่าว่าง เพื่อให้ผู้ใช้พิมพ์เอง
+          const isAutoPattern = t.taskName.endsWith(`_${t.sheetName}`) || !t.uploadUrl;
+          nameMap[key] = isAutoPattern && !t.uploadUrl ? "" : (t.taskName || "");
           if (!t.isCompleted) {
             pendingKeys.push(key);
           }
@@ -180,8 +190,7 @@ export default function HomePage() {
     const savedName = localStorage.getItem("gds_assignee");
     const initialName = savedName || "ลูกหยี";
     if (savedName) setAssignee(savedName);
-    
-    // เริ่มต้นค้นหาจากวันที่ "7 พย" ทันที เพื่อให้เร็วและเจองานแน่นอน
+
     fetchTasks(initialName, "7 พย", pendingOnly);
     loadMetadata();
   }, []);
@@ -210,24 +219,39 @@ export default function HomePage() {
     }
   };
 
+  // สร้างโฟลเดอร์ TH & INTER และอัปเดตชีต
   const handleSyncFolders = async () => {
     if (selectedTaskKeys.length === 0) {
       alert("กรุณาเลือกงานอย่างน้อย 1 รายการเพื่อสร้างโฟลเดอร์");
       return;
     }
 
-    const tasksToSync = tasks
-      .filter((t) => selectedTaskKeys.includes(getTaskKey(t.sheetName, t.row)))
-      .map((t) => {
-        const key = getTaskKey(t.sheetName, t.row);
-        return {
-          sheetName: t.sheetName,
-          row: t.row,
-          category: t.category,
-          no: t.no,
-          taskName: taskNamesMap[key] || t.taskName,
-        };
-      });
+    // ตรวจสอบว่ากรอกชื่องานครบทุกงานที่เลือกหรือยัง
+    const selectedTasks = tasks.filter((t) =>
+      selectedTaskKeys.includes(getTaskKey(t.sheetName, t.row))
+    );
+
+    for (const t of selectedTasks) {
+      const key = getTaskKey(t.sheetName, t.row);
+      const name = (taskNamesMap[key] || "").trim();
+      if (!name) {
+        alert(
+          `กรุณากรอก "ชื่องาน" สำหรับงานแถว #${t.row} (หมวด ${t.category} งานที่ ${t.no}) ก่อนกดสร้างโฟลเดอร์ครับ`
+        );
+        return;
+      }
+    }
+
+    const tasksToSync = selectedTasks.map((t) => {
+      const key = getTaskKey(t.sheetName, t.row);
+      return {
+        sheetName: t.sheetName,
+        row: t.row,
+        category: t.category,
+        no: t.no,
+        taskName: taskNamesMap[key].trim(),
+      };
+    });
 
     setIsSyncing(true);
     try {
@@ -276,7 +300,7 @@ export default function HomePage() {
   const completedTasks = totalTasks - pendingTasks;
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col font-sans pb-24">
+    <div className="min-h-screen bg-slate-50 flex flex-col font-sans pb-28">
       {/* Header Bar */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-xs">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
@@ -294,7 +318,7 @@ export default function HomePage() {
                 </span>
               </div>
               <p className="text-xs text-slate-500">
-                ระบบค้นหางานกราฟิก & สร้างโฟลเดอร์ Google Drive อัตโนมัติ
+                ระบบค้นหางานกราฟิก & สร้างโฟลเดอร์ Google Drive (TH & INTER) อัตโนมัติ
               </p>
             </div>
           </div>
@@ -330,17 +354,6 @@ export default function HomePage() {
             <div className="flex-1">
               <h4 className="text-sm font-bold text-rose-900">แจ้งเตือนการเชื่อมต่อ</h4>
               <p className="text-xs text-rose-700 mt-0.5">{errorMessage}</p>
-              {errorMessage.includes("ต้องมีสิทธิ์เข้าถึง") && (
-                <div className="mt-2 text-xs text-rose-800 bg-white/70 p-2.5 rounded-xl border border-rose-200">
-                  <b>วิธีแก้ (ทำครั้งเดียว):</b>
-                  <ol className="list-decimal ml-4 mt-1 space-y-1">
-                    <li>เปิดหน้า Apps Script ใน Google Sheets</li>
-                    <li>กดปุ่ม <b>Deploy (นำไปใช้งาน)</b> &gt; <b>Manage deployments</b></li>
-                    <li>กดไอคอนดินสอแก้ไข เลือก <b>Who has access</b> ให้เป็น <b>Anyone (ทุกคน)</b></li>
-                    <li>กดบันทึก แล้วกดปุ่ม &quot;ค้นหางานของฉัน&quot; อีกครั้ง</li>
-                  </ol>
-                </div>
-              )}
             </div>
           </div>
         )}
@@ -393,7 +406,7 @@ export default function HomePage() {
                     📅 {s}
                   </option>
                 ))}
-                <option value="ALL">🔍 ทุกวันที่ (ค้นหาข้ามทุกแท็บ)</option>
+                <option value="ALL">🔍 ทุกวันที่ (ค้นหางานค้างข้ามแท็บ)</option>
               </select>
             </div>
 
@@ -434,7 +447,7 @@ export default function HomePage() {
                 }}
                 className="w-4 h-4 text-indigo-600 rounded-sm focus:ring-indigo-500"
               />
-              <span>แสดงเฉพาะงานที่ <b>&quot;ยังไม่ได้อัปงาน&quot;</b></span>
+              <span>แสดงเฉพาะงานที่ <b>&quot;ยังไม่ได้อัปงาน (ยังไม่เสร็จสิ้น)&quot;</b></span>
             </label>
 
             <span className="text-xs text-slate-500">
@@ -476,7 +489,7 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* Sync Result Banner */}
+        {/* Sync Result Banner (With Dual Links: TH & INTER) */}
         {syncResult && (
           <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 shadow-xs">
             <div className="flex items-start gap-3">
@@ -488,35 +501,87 @@ export default function HomePage() {
                   {syncResult.message}
                 </h3>
                 <p className="text-xs text-emerald-700 mt-0.5">
-                  ระบบได้สร้างโฟลเดอร์ทั้งฝั่ง TH และ INTER ใน Google Drive พร้อมแปะลิงก์ใน Col F และเปลี่ยนสถานะเป็น &quot;เสร็จสิ้น&quot; แล้ว
+                  ระบบได้สร้างโฟลเดอร์ให้ครบทั้งฝั่ง TH และ INTER พร้อมแปะลิงก์ของ TH ลงในช่อง Col F และเปลี่ยนสถานะเป็น &quot;เสร็จสิ้น&quot; แล้วครับ สามารถกดเปิดโฟลเดอร์เพื่ออัปโหลดไฟล์งานได้ทันที:
                 </p>
+
                 {syncResult.updatedTasks && syncResult.updatedTasks.length > 0 && (
-                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
                     {syncResult.updatedTasks.map((item, idx) => (
                       <div
                         key={idx}
-                        className="bg-white p-3 rounded-xl border border-emerald-200 flex flex-col gap-2 text-xs shadow-2xs"
+                        className="bg-white p-3.5 rounded-xl border border-emerald-200 flex flex-col gap-2.5 shadow-2xs"
                       >
-                        <div className="flex items-center justify-between font-semibold text-slate-800">
-                          <span className="truncate mr-2 font-mono">
-                            📅 {item.sheetName} | {item.taskName}
+                        <div className="flex items-center justify-between font-semibold text-slate-800 text-xs">
+                          <span className="truncate mr-2 font-mono text-indigo-900 font-bold">
+                            📅 {item.sheetName} | แถว #{item.row} | {item.taskName}
                           </span>
-                          <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full shrink-0">
+                          <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full shrink-0">
                             เสร็จสิ้น
                           </span>
                         </div>
-                        <div className="flex items-center gap-2 pt-1 border-t border-slate-100">
-                          <a
-                            href={item.thFolderUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 text-indigo-600 font-bold hover:underline"
-                          >
-                            <FolderSymlink className="w-3.5 h-3.5" />
-                            <span>เปิดโฟลเดอร์ TH เพื่ออัปงาน</span>
-                            <ExternalLink className="w-3 h-3" />
-                          </a>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-slate-100">
+                          {/* TH Link Button */}
+                          <div className="flex items-center gap-1.5 bg-emerald-50/60 p-2 rounded-lg border border-emerald-100">
+                            <span className="text-base shrink-0">🇹🇭</span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[10px] font-bold text-emerald-900">โฟลเดอร์ TH</p>
+                              <a
+                                href={item.thFolderUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs text-indigo-600 font-bold hover:underline inline-flex items-center gap-1 truncate"
+                              >
+                                <span>เปิด Drive</span>
+                                <ExternalLink className="w-3 h-3" />
+                              </a>
+                            </div>
+                            <button
+                              onClick={() => copyToClipboard(item.thFolderUrl, `th_${idx}`)}
+                              className="p-1 text-slate-400 hover:text-slate-600"
+                              title="คัดลอกลิงก์ TH"
+                            >
+                              <Copy className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+
+                          {/* INTER Link Button */}
+                          <div className="flex items-center gap-1.5 bg-sky-50/60 p-2 rounded-lg border border-sky-100">
+                            <span className="text-base shrink-0">🌐</span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[10px] font-bold text-sky-900">โฟลเดอร์ INTER</p>
+                              {item.interFolderUrl ? (
+                                <a
+                                  href={item.interFolderUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-xs text-sky-700 font-bold hover:underline inline-flex items-center gap-1 truncate"
+                                >
+                                  <span>เปิด Drive</span>
+                                  <ExternalLink className="w-3 h-3" />
+                                </a>
+                              ) : (
+                                <span className="text-[11px] text-slate-400 italic">-</span>
+                              )}
+                            </div>
+                            {item.interFolderUrl && (
+                              <button
+                                onClick={() => copyToClipboard(item.interFolderUrl, `inter_${idx}`)}
+                                className="p-1 text-slate-400 hover:text-slate-600"
+                                title="คัดลอกลิงก์ INTER"
+                              >
+                                <Copy className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </div>
+
+                        {copiedLink && copiedLink.startsWith(`th_${idx}`) && (
+                          <span className="text-[10px] text-emerald-600 font-medium">✓ คัดลอกลิงก์ TH เรียบร้อย</span>
+                        )}
+                        {copiedLink && copiedLink.startsWith(`inter_${idx}`) && (
+                          <span className="text-[10px] text-sky-600 font-medium">✓ คัดลอกลิงก์ INTER เรียบร้อย</span>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -573,7 +638,7 @@ export default function HomePage() {
                         <th className="py-3 px-4 w-32">หมวดหมู่</th>
                         <th className="py-3 px-4 w-28">ใบบรีฟ</th>
                         <th className="py-3 px-3 w-16 text-center">No.</th>
-                        <th className="py-3 px-4">ชื่องาน / ชื่อโฟลเดอร์ที่จะสร้าง</th>
+                        <th className="py-3 px-4">ชื่องาน (กรอกเพื่อตั้งชื่อโฟลเดอร์ TH)</th>
                         <th className="py-3 px-4 text-center w-28">สถานะ</th>
                         <th className="py-3 px-4 text-right w-36">ลิงก์โฟลเดอร์</th>
                       </tr>
@@ -653,7 +718,7 @@ export default function HomePage() {
                                       [key]: e.target.value,
                                     }));
                                   }}
-                                  placeholder="พิมพ์ชื่องาน เช่น 2_หวยรอบเที่ยง แจกโชคหลักล้าน ที่ APB"
+                                  placeholder="พิมพ์ชื่องาน เช่น 2 หวยรอบเที่ยง แจกโชคหลักล้าน ที่ APB"
                                   className="w-full px-2.5 py-1.5 text-xs font-medium bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all pr-7"
                                 />
                                 <Edit3 className="w-3.5 h-3.5 text-slate-300 absolute right-2 top-2 pointer-events-none" />
