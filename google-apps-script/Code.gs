@@ -63,9 +63,25 @@ const CATEGORY_MAP_INTER = {
 };
 
 function extractFolderId(urlOrId) {
-  if (!urlOrId) return null;
-  const match = urlOrId.match(/[-\w]{25,}/);
-  return match ? match[0] : urlOrId;
+  if (!urlOrId || typeof urlOrId !== "string") return null;
+  const str = urlOrId.trim();
+  // 1. ตรวจสอบ pattern /folders/ID
+  const folderMatch = str.match(/\/folders\/([-\w]{25,})/i);
+  if (folderMatch && folderMatch[1]) {
+    return folderMatch[1];
+  }
+  // 2. ตรวจสอบ id=ID ใน URL
+  const idParamMatch = str.match(/[?&]id=([-\w]{25,})/i);
+  if (idParamMatch && idParamMatch[1]) {
+    return idParamMatch[1];
+  }
+  // 3. ตรวจสอบหากเป็น ID เพียวๆ ความยาวอย่างน้อย 25 ตัวอักษร
+  const generalMatch = str.match(/^[-\w]{25,}$/);
+  if (generalMatch) {
+    return generalMatch[0];
+  }
+  const embeddedMatch = str.match(/[-\w]{25,}/);
+  return embeddedMatch ? embeddedMatch[0] : null;
 }
 
 /**
@@ -184,37 +200,105 @@ function extractCellLinkAndTitle(val, richText, formula) {
 }
 
 /**
- * ดึง Root Folders ประจำเดือนของ TH (Col F3) และ INTER (Col G3)
+ * ดึง ID ของโฟลเดอร์ Google Drive จากเซลล์ (รองรับ Formula =HYPERLINK, RichText, และ Text)
+ */
+function extractDriveFolderFromCell(cell) {
+  if (!cell) return null;
+
+  // 1. ตรวจสอบ Formula เช่น =HYPERLINK("https://drive.google.com/...", "TH M11")
+  try {
+    const formula = cell.getFormula();
+    if (formula && typeof formula === "string" && formula.toUpperCase().indexOf("HYPERLINK") !== -1) {
+      const match = formula.match(/HYPERLINK\(\s*["']([^"']+)["']/i);
+      if (match && match[1]) {
+        const id = extractFolderId(match[1]);
+        if (id) return id;
+      }
+    }
+  } catch (e) {}
+
+  // 2. ตรวจสอบ RichTextValue (LinkUrl หลัก และ runs)
+  try {
+    const rich = cell.getRichTextValue();
+    if (rich) {
+      const directUrl = rich.getLinkUrl();
+      if (directUrl) {
+        const id = extractFolderId(directUrl);
+        if (id) return id;
+      }
+      const runs = rich.getRuns();
+      if (runs && runs.length > 0) {
+        for (let i = 0; i < runs.length; i++) {
+          const runUrl = runs[i].getLinkUrl();
+          if (runUrl) {
+            const id = extractFolderId(runUrl);
+            if (id) return id;
+          }
+        }
+      }
+    }
+  } catch (e) {}
+
+  // 3. ตรวจสอบ Value ธรรมดา
+  try {
+    const val = cell.getValue();
+    if (val && typeof val === "string") {
+      const id = extractFolderId(val);
+      if (id) return id;
+    }
+  } catch (e) {}
+
+  return null;
+}
+
+/**
+ * ดึง Root Folders ประจำเดือนของ TH (Col F แถว 3) และ INTER (Col G แถว 3)
  */
 function getMonthlyRootFolders(sheet) {
+  // ลำดับ 1: Col F แถว 3 คือ TH (เช่น "TH M11"), Col G แถว 3 คือ INTER (เช่น "INTER  เดือน 11")
   const cellF3 = sheet.getRange(3, 6);
   const cellG3 = sheet.getRange(3, 7);
 
-  const f3Extracted = extractCellLinkAndTitle(
-    cellF3.getValue(),
-    cellF3.getRichTextValue(),
-    cellF3.getFormula()
-  );
-  const g3Extracted = extractCellLinkAndTitle(
-    cellG3.getValue(),
-    cellG3.getRichTextValue(),
-    cellG3.getFormula()
-  );
+  let thFolderId = extractDriveFolderFromCell(cellF3);
+  let interFolderId = extractDriveFolderFromCell(cellG3);
 
-  const thUrl = f3Extracted.link || f3Extracted.title;
-  const interUrl = g3Extracted.link || g3Extracted.title;
-
-  const thFolderId = extractFolderId(thUrl);
-  const interFolderId = extractFolderId(interUrl);
-
+  // Fallback: ถ้า F3 หรือ G3 หา ID ไม่เจอ ให้ลองตรวจสอบแถว 1-3 เผื่อกรณีมีการ Merge เซลล์
   if (!thFolderId) {
-    throw new Error(`ไม่พบ Link โฟลเดอร์ TH ในช่อง F3 ของแผ่นงาน: ${sheet.getName()}`);
+    for (let r = 1; r <= 3; r++) {
+      thFolderId = extractDriveFolderFromCell(sheet.getRange(r, 6));
+      if (thFolderId) break;
+    }
+  }
+  if (!interFolderId) {
+    for (let r = 1; r <= 3; r++) {
+      interFolderId = extractDriveFolderFromCell(sheet.getRange(r, 7));
+      if (interFolderId) break;
+    }
   }
 
-  const thFolder = DriveApp.getFolderById(thFolderId);
-  const interFolder = interFolderId ? DriveApp.getFolderById(interFolderId) : null;
+  if (!thFolderId) {
+    const f3Val = cellF3.getValue() || "";
+    throw new Error(`ไม่พบลิงก์ Google Drive ในช่อง F3 (TH) ของแผ่นงาน "${sheet.getName()}": พบค่า "${f3Val}" แต่ไม่มี Hyperlink หรือ Folder ID ที่ถูกต้อง`);
+  }
 
-  return { thFolder, interFolder };
+  let thFolder = null;
+  try {
+    thFolder = DriveApp.getFolderById(thFolderId);
+  } catch (e) {
+    throw new Error(`ไม่สามารถเปิดโฟลเดอร์ Google Drive ฝั่ง TH (ID: ${thFolderId}): ${e.message}`);
+  }
+
+  let interFolder = null;
+  if (interFolderId) {
+    try {
+      interFolder = DriveApp.getFolderById(interFolderId);
+    } catch (e) {
+      Logger.log(`ไม่สามารถเปิดโฟลเดอร์ INTER (ID: ${interFolderId}): ${e.message}`);
+      interFolder = null;
+    }
+  }
+
+  return { thFolder: thFolder, interFolder: interFolder };
 }
 
 /**
@@ -513,7 +597,11 @@ function doGet(e) {
     return ContentService.createTextOutput(JSON.stringify(data))
       .setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({ success: false, error: err.toString() }))
+    return ContentService.createTextOutput(JSON.stringify({ 
+      success: false, 
+      error: err.toString(),
+      message: err.toString()
+    }))
       .setMimeType(ContentService.MimeType.JSON);
   }
 }
@@ -533,7 +621,11 @@ function doPost(e) {
     return ContentService.createTextOutput(JSON.stringify(data))
       .setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({ success: false, error: err.toString() }))
+    return ContentService.createTextOutput(JSON.stringify({ 
+      success: false, 
+      error: err.toString(),
+      message: err.toString()
+    }))
       .setMimeType(ContentService.MimeType.JSON);
   }
 }

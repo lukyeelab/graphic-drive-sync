@@ -237,7 +237,7 @@ export default function HomePage() {
       const name = (taskNamesMap[key] || "").trim();
       if (!name) {
         alert(
-          `กรุณากรอก "ชื่องาน" สำหรับงานแถว #${t.row} (หมวด ${t.category} งานที่ ${t.no}) ก่อนกดสร้างโฟลเดอร์ครับ`
+          `กรุณากรอก "ชื่องาน/ชื่อโฟลเดอร์" สำหรับงานแถว #${t.row} (หมวด ${t.category} งานที่ ${t.no}) ก่อนกดสร้างโฟลเดอร์ครับ`
         );
         return;
       }
@@ -269,7 +269,7 @@ export default function HomePage() {
         setSyncResult(result);
         fetchTasks(assignee, sheetName, pendingOnly);
       } else {
-        alert(result.message || "เกิดข้อผิดพลาดในการสร้างโฟลเดอร์");
+        alert(result.error || result.message || "เกิดข้อผิดพลาดในการสร้างโฟลเดอร์");
       }
     } catch (err) {
       console.error(err);
@@ -639,7 +639,7 @@ export default function HomePage() {
                         <th className="py-3 px-4 w-32">หมวดหมู่</th>
                         <th className="py-3 px-4 w-44">ใบบรีฟ</th>
                         <th className="py-3 px-3 w-16 text-center">No.</th>
-                        <th className="py-3 px-4">ชื่องาน (กรอกเพื่อตั้งชื่อโฟลเดอร์ TH)</th>
+                        <th className="py-3 px-4">ชื่องาน/ชื่อโฟลเดอร์ (สำหรับสร้างโฟลเดอร์ TH)</th>
                         <th className="py-3 px-4 text-center w-28">สถานะ</th>
                         <th className="py-3 px-4 text-right w-36">ลิงก์โฟลเดอร์</th>
                       </tr>
@@ -721,7 +721,7 @@ export default function HomePage() {
                                       [key]: e.target.value,
                                     }));
                                   }}
-                                  placeholder="พิมพ์ชื่องาน เช่น 2 หวยรอบเที่ยง แจกโชคหลักล้าน ที่ APB"
+                                  placeholder="พิมพ์ชื่องาน/ชื่อโฟลเดอร์ เช่น 2 หวยรอบเที่ยง แจกโชคหลักล้าน ที่ APB"
                                   className="w-full px-2.5 py-1.5 text-xs font-medium bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all pr-7"
                                 />
                                 <Edit3 className="w-3.5 h-3.5 text-slate-300 absolute right-2 top-2 pointer-events-none" />

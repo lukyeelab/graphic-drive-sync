@@ -46,6 +46,9 @@ export async function POST(req: NextRequest) {
 
     try {
       const data = JSON.parse(responseText);
+      if (data && !data.success && data.error && !data.message) {
+        data.message = data.error;
+      }
       return NextResponse.json(data);
     } catch {
       if (
