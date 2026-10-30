@@ -721,7 +721,7 @@ export default function HomePage() {
                                       [key]: e.target.value,
                                     }));
                                   }}
-                                  placeholder="พิมพ์ชื่องาน/ชื่อโฟลเดอร์ เช่น 2 หวยรอบเที่ยง แจกโชคหลักล้าน ที่ APB"
+                                  placeholder="พิมพ์ชื่องาน/ชื่อโฟลเดอร์"
                                   className="w-full px-2.5 py-1.5 text-xs font-medium bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all pr-7"
                                 />
                                 <Edit3 className="w-3.5 h-3.5 text-slate-300 absolute right-2 top-2 pointer-events-none" />
