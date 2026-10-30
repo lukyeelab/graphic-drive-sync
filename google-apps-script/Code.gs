@@ -252,50 +252,198 @@ function extractDriveFolderFromCell(cell) {
 }
 
 /**
+ * ค้นหาโฟลเดอร์ Google Drive ตามชื่อ (เช่น "TH M11" -> ค้นหา "M11" ก่อน)
+ */
+function findFolderByNameSmart(cellText, fallbackNames) {
+  const candidates = [];
+  if (cellText && typeof cellText === "string") {
+    const raw = cellText.trim();
+    // ตัดคำว่า TH หรือ INTER และช่องว่างออก เช่น "TH M11" -> "M11", "INTER  เดือน 11" -> "เดือน 11"
+    const stripped = raw.replace(/^(TH|INTER)\s*/i, "").trim();
+    if (stripped) candidates.push(stripped);
+    if (raw !== stripped) candidates.push(raw);
+  }
+
+  if (fallbackNames && Array.isArray(fallbackNames)) {
+    for (let i = 0; i < fallbackNames.length; i++) {
+      if (!candidates.includes(fallbackNames[i])) {
+        candidates.push(fallbackNames[i]);
+      }
+    }
+  }
+
+  for (let i = 0; i < candidates.length; i++) {
+    const name = candidates[i];
+    try {
+      const iter = DriveApp.getFoldersByName(name);
+      while (iter.hasNext()) {
+        const folder = iter.next();
+        if (!folder.isTrashed()) {
+          return folder;
+        }
+      }
+    } catch (e) {
+      Logger.log(`ค้นหาโฟลเดอร์ ${name} ไม่สำเร็จ: ${e.message}`);
+    }
+  }
+
+  return null;
+}
+
+/**
+ * ดึง URI ของ Google Drive Smart Chip จากช่องที่ระบุผ่าน Google Sheets API v4
+ */
+function getCellSmartChipUri(spreadsheetId, sheetName, a1Notation) {
+  try {
+    const token = ScriptApp.getOAuthToken();
+    const encodedRange = encodeURIComponent(`'${sheetName}'!${a1Notation}`);
+    const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?ranges=${encodedRange}&fields=sheets(data(rowData(values(chipRuns))))`;
+    
+    const res = UrlFetchApp.fetch(apiUrl, {
+      method: "get",
+      headers: { "Authorization": "Bearer " + token },
+      muteHttpExceptions: true
+    });
+
+    if (res.getResponseCode() === 200) {
+      const data = JSON.parse(res.getContentText());
+      const rows = data.sheets?.[0]?.data?.[0]?.rowData;
+      if (rows && rows.length > 0) {
+        for (let r = 0; r < rows.length; r++) {
+          const vals = rows[r].values;
+          if (!vals) continue;
+          for (let c = 0; c < vals.length; c++) {
+            const chips = vals[c].chipRuns;
+            if (chips && chips.length > 0) {
+              for (let k = 0; k < chips.length; k++) {
+                const uri = chips[k].chip?.richLinkProperties?.uri;
+                if (uri) return uri;
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {
+    Logger.log("Error in getCellSmartChipUri: " + e.message);
+  }
+  return null;
+}
+
+/**
+ * ดึงแผนที่ Smart Chips ทั้งหมดในแผ่นงาน (สำหรับใบบรีฟ และโฟลเดอร์)
+ */
+function getSheetSmartChipsMap(spreadsheetId, sheetName, lastRow) {
+  const chipMap = {};
+  try {
+    const token = ScriptApp.getOAuthToken();
+    const encodedRange = encodeURIComponent(`'${sheetName}'!A1:N${lastRow}`);
+    const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?ranges=${encodedRange}&fields=sheets(data(rowData(values(chipRuns))))`;
+    
+    const res = UrlFetchApp.fetch(apiUrl, {
+      method: "get",
+      headers: { "Authorization": "Bearer " + token },
+      muteHttpExceptions: true
+    });
+
+    if (res.getResponseCode() === 200) {
+      const data = JSON.parse(res.getContentText());
+      const rows = data.sheets?.[0]?.data?.[0]?.rowData;
+      if (rows && rows.length > 0) {
+        for (let r = 0; r < rows.length; r++) {
+          const vals = rows[r].values;
+          if (!vals) continue;
+          for (let c = 0; c < vals.length; c++) {
+            const chips = vals[c].chipRuns;
+            if (chips && chips.length > 0) {
+              for (let k = 0; k < chips.length; k++) {
+                const uri = chips[k].chip?.richLinkProperties?.uri;
+                if (uri) {
+                  chipMap[`${r + 1}_${c + 1}`] = uri;
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {
+    Logger.log("Error in getSheetSmartChipsMap: " + e.message);
+  }
+  return chipMap;
+}
+
+/**
  * ดึง Root Folders ประจำเดือนของ TH (Col F แถว 3) และ INTER (Col G แถว 3)
+ * รองรับทั้ง Google Drive Smart Chip (เช่น M11, เดือน 11), Link Hyperlink, และการค้นหาตามชื่อโฟลเดอร์
  */
 function getMonthlyRootFolders(sheet) {
-  // ลำดับ 1: Col F แถว 3 คือ TH (เช่น "TH M11"), Col G แถว 3 คือ INTER (เช่น "INTER  เดือน 11")
-  const cellF3 = sheet.getRange(3, 6);
-  const cellG3 = sheet.getRange(3, 7);
-
-  let thFolderId = extractDriveFolderFromCell(cellF3);
-  let interFolderId = extractDriveFolderFromCell(cellG3);
-
-  // Fallback: ถ้า F3 หรือ G3 หา ID ไม่เจอ ให้ลองตรวจสอบแถว 1-3 เผื่อกรณีมีการ Merge เซลล์
-  if (!thFolderId) {
-    for (let r = 1; r <= 3; r++) {
-      thFolderId = extractDriveFolderFromCell(sheet.getRange(r, 6));
-      if (thFolderId) break;
-    }
-  }
-  if (!interFolderId) {
-    for (let r = 1; r <= 3; r++) {
-      interFolderId = extractDriveFolderFromCell(sheet.getRange(r, 7));
-      if (interFolderId) break;
-    }
-  }
-
-  if (!thFolderId) {
-    const f3Val = cellF3.getValue() || "";
-    throw new Error(`ไม่พบลิงก์ Google Drive ในช่อง F3 (TH) ของแผ่นงาน "${sheet.getName()}": พบค่า "${f3Val}" แต่ไม่มี Hyperlink หรือ Folder ID ที่ถูกต้อง`);
-  }
+  const ss = sheet.getParent();
+  const ssId = ss.getId();
+  const sheetName = sheet.getName();
 
   let thFolder = null;
+  let interFolder = null;
+
+  // 1. ลองดึงจาก Google Sheets API ผ่าน UrlFetchApp (สำหรับ Smart Chips เช่น M11 และ เดือน 11)
   try {
-    thFolder = DriveApp.getFolderById(thFolderId);
+    const chipF3Url = getCellSmartChipUri(ssId, sheetName, "F3");
+    if (chipF3Url) {
+      const id = extractFolderId(chipF3Url);
+      if (id) {
+        try { thFolder = DriveApp.getFolderById(id); } catch(e) {}
+      }
+    }
   } catch (e) {
-    throw new Error(`ไม่สามารถเปิดโฟลเดอร์ Google Drive ฝั่ง TH (ID: ${thFolderId}): ${e.message}`);
+    Logger.log("Chip F3 fetch: " + e.message);
   }
 
-  let interFolder = null;
-  if (interFolderId) {
-    try {
-      interFolder = DriveApp.getFolderById(interFolderId);
-    } catch (e) {
-      Logger.log(`ไม่สามารถเปิดโฟลเดอร์ INTER (ID: ${interFolderId}): ${e.message}`);
-      interFolder = null;
+  try {
+    const chipG3Url = getCellSmartChipUri(ssId, sheetName, "G3");
+    if (chipG3Url) {
+      const id = extractFolderId(chipG3Url);
+      if (id) {
+        try { interFolder = DriveApp.getFolderById(id); } catch(e) {}
+      }
     }
+  } catch (e) {
+    Logger.log("Chip G3 fetch: " + e.message);
+  }
+
+  // 2. ถ้ายังไม่ได้ ลองดึงจาก Formula (=HYPERLINK) หรือ RichText ของเซลล์ปกติ
+  if (!thFolder) {
+    const cellF3 = sheet.getRange(3, 6);
+    const f3Id = extractDriveFolderFromCell(cellF3);
+    if (f3Id) {
+      try { thFolder = DriveApp.getFolderById(f3Id); } catch(e) {}
+    }
+  }
+
+  if (!interFolder) {
+    const cellG3 = sheet.getRange(3, 7);
+    const g3Id = extractDriveFolderFromCell(cellG3);
+    if (g3Id) {
+      try { interFolder = DriveApp.getFolderById(g3Id); } catch(e) {}
+    }
+  }
+
+  // 3. Fallback สำคัญ: ค้นหาโฟลเดอร์ใน Google Drive โดยตรงจากชื่อของ Smart Chip
+  // เช่น ในช่อง F3 มีชิป "M11" หรือข้อความ "TH M11" -> ค้นหาโฟลเดอร์ชื่อ "M11" ใน Google Drive
+  // ในช่อง G3 มีชิป "เดือน 11" หรือข้อความ "INTER  เดือน 11" -> ค้นหาโฟลเดอร์ชื่อ "เดือน 11"
+  if (!thFolder) {
+    const f3Val = sheet.getRange(3, 6).getValue()?.toString() || "";
+    thFolder = findFolderByNameSmart(f3Val, ["M11", "TH M11", "TH_M11"]);
+  }
+
+  if (!interFolder) {
+    const g3Val = sheet.getRange(3, 7).getValue()?.toString() || "";
+    interFolder = findFolderByNameSmart(g3Val, ["เดือน 11", "INTER  เดือน 11", "INTER เดือน 11", "INTER_11"]);
+  }
+
+  if (!thFolder) {
+    const f3Val = sheet.getRange(3, 6).getValue() || "";
+    throw new Error(`ไม่พบโฟลเดอร์ Google Drive ของ TH ในช่อง F3 (ค่าในช่องคือ "${f3Val}") กรุณาตรวจสอบว่ามีโฟลเดอร์ชื่อ M11 ใน Google Drive หรือมีสิทธิ์เข้าถึง`);
   }
 
   return { thFolder: thFolder, interFolder: interFolder };
@@ -371,6 +519,7 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
     const values = range.getValues();
     const richTexts = range.getRichTextValues();
     const formulas = range.getFormulas();
+    const chipMap = getSheetSmartChipsMap(ss.getId(), sheetName, lastRow);
 
     let currentCategory = "";
     let currentBriefLink = "";
@@ -388,13 +537,16 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
         currentBriefTitle = "";
       }
 
-      // จัดการใบบรีฟ (Col D: Merged Cell) - ตรวจสอบทั้ง Formula, RichText runs และ URL ตรง
+      // จัดการใบบรีฟ (Col D: Merged Cell) - ตรวจสอบทั้ง Smart Chip, Formula, RichText runs และ URL ตรง
       const briefVal = values[rowIdx][CONFIG.COL_BRIEF_LINK - 1];
       const briefRich = richTexts[rowIdx][CONFIG.COL_BRIEF_LINK - 1];
       const briefFormula = formulas[rowIdx][CONFIG.COL_BRIEF_LINK - 1];
       const extractedBrief = extractCellLinkAndTitle(briefVal, briefRich, briefFormula);
+      const briefChipUri = chipMap[`${r}_${CONFIG.COL_BRIEF_LINK}`];
 
-      if (extractedBrief.link) {
+      if (briefChipUri) {
+        currentBriefLink = briefChipUri;
+      } else if (extractedBrief.link) {
         currentBriefLink = extractedBrief.link;
       }
       if (extractedBrief.title) {
@@ -404,12 +556,13 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
       const rowAssignee = values[rowIdx][CONFIG.COL_ASSIGNEE - 1]?.toString().trim() || "";
       const noVal = values[rowIdx][CONFIG.COL_NO - 1];
 
-      // จัดการลิงก์อัปงาน Col F (รองรับทั้ง RichText, Formula, และ Plain Text)
+      // จัดการลิงก์อัปงาน Col F (รองรับ Smart Chip, RichText, Formula, และ Plain Text)
       const uploadCellText = values[rowIdx][CONFIG.COL_UPLOAD_LINK - 1]?.toString().trim() || "";
       const uploadRich = richTexts[rowIdx][CONFIG.COL_UPLOAD_LINK - 1];
       const uploadFormula = formulas[rowIdx][CONFIG.COL_UPLOAD_LINK - 1];
       const extractedUpload = extractCellLinkAndTitle(uploadCellText, uploadRich, uploadFormula);
-      const uploadUrl = extractedUpload.link;
+      const uploadChipUri = chipMap[`${r}_${CONFIG.COL_UPLOAD_LINK}`];
+      const uploadUrl = uploadChipUri || extractedUpload.link;
 
       const team = values[rowIdx][CONFIG.COL_TEAM - 1]?.toString().trim() || "";
       const assignDate = values[rowIdx][CONFIG.COL_ASSIGN_DATE - 1];
