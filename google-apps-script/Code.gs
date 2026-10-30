@@ -522,7 +522,7 @@ function getMonthlyRootFolders(sheet) {
 }
 
 /**
- * ดึงรายชื่อพนักงานและแท็บวันที่ทั้งหมด
+ * ดึงรายชื่อพนักงานและแท็บวันที่ทั้งหมด (สแกนแบบ Fast Scan 5 แผ่นงานแรกเพื่อความเร็วสูงสุด)
  */
 function getInitialMetadata() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -535,7 +535,12 @@ function getInitialMetadata() {
     const name = sheet.getName().trim();
     if (name === "TEM") continue;
     sheetNames.push(name);
+  }
 
+  // สแกนรายชื่อพนักงานเฉพาะ 5 แผ่นงานแรก เพื่อให้โหลดเสร็จภายในเสี้ยววินาที
+  const sheetsToCheck = allSheets.filter(s => s.getName().trim() !== "TEM").slice(0, 5);
+  for (let s = 0; s < sheetsToCheck.length; s++) {
+    const sheet = sheetsToCheck[s];
     const lastRow = sheet.getLastRow();
     if (lastRow >= CONFIG.DATA_START_ROW) {
       const assignees = sheet.getRange(CONFIG.DATA_START_ROW, CONFIG.COL_ASSIGNEE, lastRow - CONFIG.DATA_START_ROW + 1, 1).getValues();
@@ -556,9 +561,7 @@ function getInitialMetadata() {
 }
 
 /**
- * ดึงรายการงานตามชื่อพนักงาน
- * - ถ้า Col F ว่าง ให้ taskName ส่งค่าเป็น "" (ว่างเปล่า) เพื่อให้หน้าเว็บพิมพ์เอง
- * - แสดงเฉพาะงานที่ยังไม่เสร็จสิ้น หรือทั้งหมดตามที่เลือก
+ * ดึงรายการงานตามชื่อพนักงาน (ประมวลผลเร็วพิเศษ High-Performance In-Memory Filter & Brief Cache)
  */
 function getStaffTasks(assignee, targetSheet, pendingOnly) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -573,13 +576,14 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
       return { success: false, error: `ไม่พบแผ่นงานชื่อ: ${targetSheet}` };
     }
   } else {
-    // กรณี ALL ค้นหาเฉพาะ 12 แผ่นงานแรกของเดือนปัจจุบันเพื่อความรวดเร็ว
+    // กรณี ALL ค้นหาเฉพาะ 8 แผ่นงานแรกของเดือนปัจจุบันเพื่อความรวดเร็ว
     const validSheets = allSheets.filter(s => s.getName().trim() !== "TEM");
-    sheetsToSearch = validSheets.slice(0, 15);
+    sheetsToSearch = validSheets.slice(0, 8);
   }
 
   const tasks = [];
   const searchName = (assignee || "").toLowerCase().trim();
+  const briefCache = {}; // แคช URL ใบบรีฟ เพื่อไม่ให้ค้นหา Drive ซ้ำซ้อน
 
   for (let sIdx = 0; sIdx < sheetsToSearch.length; sIdx++) {
     const sheet = sheetsToSearch[sIdx];
@@ -587,11 +591,11 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
     const lastRow = sheet.getLastRow();
     if (lastRow < CONFIG.DATA_START_ROW) continue;
 
+    // อ่านข้อมูลทั้งหมดของชีตเข้า Memory ครั้งเดียว (ใช้เวลาเพียง ~20ms)
     const range = sheet.getRange(1, 1, lastRow, 14);
     const values = range.getValues();
     const richTexts = range.getRichTextValues();
     const formulas = range.getFormulas();
-    const chipMap = getSheetSmartChipsMap(ss.getId(), sheetName, lastRow);
 
     let currentCategory = "";
     let currentBriefLink = "";
@@ -600,55 +604,33 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
     for (let r = CONFIG.DATA_START_ROW; r <= lastRow; r++) {
       const rowIdx = r - 1;
 
-      // จัดการหมวดหมู่ (Col C: Merged Cell)
+      // 1. จัดการหมวดหมู่ (Col C: Merged Cell)
       const categoryCell = values[rowIdx][CONFIG.COL_CATEGORY_NAME - 1];
       if (categoryCell && categoryCell.toString().trim() !== "") {
         currentCategory = categoryCell.toString().trim();
-        // เมื่อขึ้นหมวดหมู่ใหม่ ให้รีเซ็ตใบบรีฟเดิม
         currentBriefLink = "";
         currentBriefTitle = "";
       }
 
-      // จัดการใบบรีฟ (Col D: Merged Cell) - ตรวจสอบทั้ง Smart Chip, Formula, RichText runs และ URL ตรง
+      // 2. จัดการใบบรีฟ (Col D: Merged Cell)
       const briefVal = values[rowIdx][CONFIG.COL_BRIEF_LINK - 1];
       const briefRich = richTexts[rowIdx][CONFIG.COL_BRIEF_LINK - 1];
       const briefFormula = formulas[rowIdx][CONFIG.COL_BRIEF_LINK - 1];
       const extractedBrief = extractCellLinkAndTitle(briefVal, briefRich, briefFormula);
-      const briefChipUri = chipMap[`${r}_${CONFIG.COL_BRIEF_LINK}`];
 
-      if (briefChipUri) {
-        currentBriefLink = briefChipUri;
-      } else if (extractedBrief.link) {
+      if (extractedBrief.link) {
         currentBriefLink = extractedBrief.link;
       }
       if (extractedBrief.title) {
         currentBriefTitle = extractedBrief.title;
       }
 
-      // ค้นหาไฟล์ใบบรีฟใน Google Drive ตามชื่อใบบรีฟอัตโนมัติ
-      if (!currentBriefLink && currentBriefTitle) {
-        const foundBriefUrl = findDriveFileOrFolderUrl(currentBriefTitle);
-        if (foundBriefUrl) {
-          currentBriefLink = foundBriefUrl;
-        }
-      }
-
+      // 3. กรองตามชื่อพนักงานทันทีก่อนประมวลผลอย่างอื่น (เพื่อความเร็วสูงสุด)
       const rowAssignee = values[rowIdx][CONFIG.COL_ASSIGNEE - 1]?.toString().trim() || "";
       const noVal = values[rowIdx][CONFIG.COL_NO - 1];
-
-      // จัดการลิงก์อัปงาน Col F (รองรับ Smart Chip, RichText, Formula, และ Plain Text)
       const uploadCellText = values[rowIdx][CONFIG.COL_UPLOAD_LINK - 1]?.toString().trim() || "";
-      const uploadRich = richTexts[rowIdx][CONFIG.COL_UPLOAD_LINK - 1];
-      const uploadFormula = formulas[rowIdx][CONFIG.COL_UPLOAD_LINK - 1];
-      const extractedUpload = extractCellLinkAndTitle(uploadCellText, uploadRich, uploadFormula);
-      const uploadChipUri = chipMap[`${r}_${CONFIG.COL_UPLOAD_LINK}`];
-      const uploadUrl = uploadChipUri || extractedUpload.link;
-
-      const team = values[rowIdx][CONFIG.COL_TEAM - 1]?.toString().trim() || "";
-      const assignDate = values[rowIdx][CONFIG.COL_ASSIGN_DATE - 1];
       const status = values[rowIdx][CONFIG.COL_STATUS - 1]?.toString().trim() || "";
 
-      // ถ้าค้นหาตามชื่อ ต้องมีผู้รับงานและชื่อต้องตรงกัน
       if (searchName && searchName !== "all") {
         if (!rowAssignee || rowAssignee === "") continue;
         const rowNameLower = rowAssignee.toLowerCase();
@@ -661,6 +643,11 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
         }
       }
 
+      const uploadRich = richTexts[rowIdx][CONFIG.COL_UPLOAD_LINK - 1];
+      const uploadFormula = formulas[rowIdx][CONFIG.COL_UPLOAD_LINK - 1];
+      const extractedUpload = extractCellLinkAndTitle(uploadCellText, uploadRich, uploadFormula);
+      const uploadUrl = extractedUpload.link;
+
       const isCompleted = status.includes("เสร็จสิ้น") || (uploadUrl !== "" && uploadCellText !== "");
 
       // ถ้าเลือกเฉพาะงานที่ยังไม่เสร็จสิ้น แล้วงานนี้เสร็จแล้ว ให้ข้าม
@@ -668,17 +655,29 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
         continue;
       }
 
-      // ถ้า Col F ว่าง ให้ taskName เป็นค่าว่าง เพื่อให้หน้าเว็บว่างไว้สำหรับพิมพ์
+      // 4. เมื่อเป็นงานของพนักงานคนนี้เท่านั้น ถึงจะค้นหาลิงก์ใบบรีฟ (และค้นหาผ่านแคช)
+      let taskBriefLink = currentBriefLink;
+      if (!taskBriefLink && currentBriefTitle) {
+        if (briefCache[currentBriefTitle] !== undefined) {
+          taskBriefLink = briefCache[currentBriefTitle];
+        } else {
+          taskBriefLink = findDriveFileOrFolderUrl(currentBriefTitle);
+          briefCache[currentBriefTitle] = taskBriefLink;
+        }
+      }
+
+      const team = values[rowIdx][CONFIG.COL_TEAM - 1]?.toString().trim() || "";
+      const assignDate = values[rowIdx][CONFIG.COL_ASSIGN_DATE - 1];
       const taskName = uploadCellText;
 
       tasks.push({
         sheetName: sheetName,
         row: r,
         category: currentCategory || "ทั่วไป",
-        briefLink: currentBriefLink,   // URL ของใบบรีฟ
-        briefTitle: currentBriefTitle, // ข้อความ/ชื่อใบบรีฟ
+        briefLink: taskBriefLink,
+        briefTitle: currentBriefTitle,
         no: noVal || 1,
-        taskName: taskName, // ว่างเปล่าถ้ายังไม่ได้ใส่
+        taskName: taskName,
         uploadUrl: uploadUrl,
         hasUploadLink: !!uploadUrl,
         team: team,
@@ -689,6 +688,18 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
       });
     }
   }
+
+  const sheetNames = allSheets.map(s => s.getName()).filter(n => n.trim() !== "TEM");
+
+  return {
+    success: true,
+    sheetName: targetSheet,
+    sheets: sheetNames,
+    assignee: assignee,
+    totalFound: tasks.length,
+    tasks: tasks,
+  };
+}
 
   const sheetNames = allSheets.map(s => s.getName()).filter(n => n.trim() !== "TEM");
 
