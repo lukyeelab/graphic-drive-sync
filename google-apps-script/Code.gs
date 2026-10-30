@@ -200,14 +200,43 @@ function extractCellLinkAndTitle(val, richText, formula) {
 }
 
 /**
- * ค้นหา URL ของไฟล์หรือโฟลเดอร์ใบบรีฟใน Google Drive ตามชื่อ (เช่น Google Slides / Docs)
+ * ค้นหา URL ของไฟล์หรือโฟลเดอร์ใบบรีฟใน Google Drive ตามชื่อ (เน้น Google Slides Presentation)
  */
 function findDriveFileOrFolderUrl(title) {
   if (!title || typeof title !== "string") return "";
   const cleanTitle = title.trim();
   if (!cleanTitle || cleanTitle.length < 2) return "";
 
-  // 1. ลองค้นหาไฟล์ตรงตามชื่อ
+  const singleSpaced = cleanTitle.replace(/\s+/g, " ");
+
+  // 1. ค้นหา Google Slides (Presentation) โดยตรง (เพราะใบบรีฟส่วนใหญ่เป็น Google Slides Presentation)
+  try {
+    const segments = singleSpaced.split(/[-–—]/);
+    const mainKey = (segments[0] || singleSpaced).trim().replace(/['"\\]/g, "");
+
+    if (mainKey.length >= 3) {
+      const q = `title contains '${mainKey}' and mimeType = 'application/vnd.google-apps.presentation' and trashed = false`;
+      const slides = DriveApp.searchFiles(q);
+      if (slides.hasNext()) {
+        const slide = slides.next();
+        return slide.getUrl(); // คืนค่าเป็น https://docs.google.com/presentation/d/.../edit
+      }
+    }
+  } catch (e) {
+    Logger.log("Slides search error: " + e.message);
+  }
+
+  // 2. ลองค้นหาไฟล์ตรงตามชื่อ (ทุก MimeType)
+  try {
+    const files = DriveApp.getFilesByName(singleSpaced);
+    while (files.hasNext()) {
+      const f = files.next();
+      if (!f.isTrashed()) {
+        return f.getUrl();
+      }
+    }
+  } catch (e) {}
+
   try {
     const files = DriveApp.getFilesByName(cleanTitle);
     while (files.hasNext()) {
@@ -218,21 +247,17 @@ function findDriveFileOrFolderUrl(title) {
     }
   } catch (e) {}
 
-  // 2. ลองค้นหาแบบตัดช่องว่างส่วนเกิน (เช่น มีเว้นวรรค 2 เคาะ)
-  const normalized = cleanTitle.replace(/\s+/g, " ");
-  if (normalized !== cleanTitle) {
-    try {
-      const files2 = DriveApp.getFilesByName(normalized);
-      while (files2.hasNext()) {
-        const f = files2.next();
-        if (!f.isTrashed()) {
-          return f.getUrl();
-        }
-      }
-    } catch (e) {}
-  }
+  // 3. ค้นหาแบบ title contains ทั่วไป
+  try {
+    const safeTitle = singleSpaced.replace(/['"\\]/g, "");
+    const qGeneral = `title contains '${safeTitle.slice(0, 25)}' and trashed = false`;
+    const iter = DriveApp.searchFiles(qGeneral);
+    if (iter.hasNext()) {
+      return iter.next().getUrl();
+    }
+  } catch (e) {}
 
-  // 3. ลองค้นหาเป็นโฟลเดอร์ใน Drive
+  // 4. ลองค้นหาเป็นโฟลเดอร์ใน Drive
   try {
     const folders = DriveApp.getFoldersByName(cleanTitle);
     while (folders.hasNext()) {
@@ -760,9 +785,17 @@ function createFoldersAndSyncBatch(payload) {
         .build();
       cellF.setRichTextValue(richValue);
 
-      // 8. เปลี่ยนสถานะ Col L เป็น "เสร็จสิ้น"
+      // 8. เปลี่ยนสถานะ Col L เป็น "เสร็จสิ้น ✅" ตามกฎ Data Validation ของชีต
       const cellL = sheet.getRange(row, CONFIG.COL_STATUS);
-      cellL.setValue("เสร็จสิ้น");
+      try {
+        cellL.setValue("เสร็จสิ้น ✅");
+      } catch (e1) {
+        try {
+          cellL.setValue("เสร็จสิ้น");
+        } catch (e2) {
+          Logger.log(`ไม่สามารถตั้งค่าสถานะแถว ${row}: ${e2.message}`);
+        }
+      }
 
       results.push({
         sheetName: sName,
@@ -770,7 +803,7 @@ function createFoldersAndSyncBatch(payload) {
         taskName: taskName,
         thFolderUrl: thUrl,
         interFolderUrl: interUrl,
-        status: "เสร็จสิ้น",
+        status: "เสร็จสิ้น ✅",
       });
     }
   }
