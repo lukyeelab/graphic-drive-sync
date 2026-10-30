@@ -4,10 +4,18 @@ import { getTasksQuerySchema } from "@/lib/validations/task";
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const sheet = searchParams.get("sheet") || "7 พย";
+    const action = searchParams.get("action") || "getTasks";
+    const sheet = searchParams.get("sheet") || "ALL";
     const assignee = searchParams.get("assignee") || "";
+    const pendingOnly = searchParams.get("pendingOnly") || "true";
 
-    const validation = getTasksQuerySchema.safeParse({ sheet, assignee });
+    const validation = getTasksQuerySchema.safeParse({
+      action,
+      sheet,
+      assignee,
+      pendingOnly,
+    });
+
     if (!validation.success) {
       return NextResponse.json(
         { success: false, errors: validation.error.flatten() },
@@ -27,35 +35,35 @@ export async function GET(req: NextRequest) {
     }
 
     const targetUrl = new URL(gasUrl);
-    targetUrl.searchParams.set("action", "getTasks");
-    targetUrl.searchParams.set("sheet", sheet);
-    if (assignee) {
+    targetUrl.searchParams.set("action", action);
+    if (action === "getTasks") {
+      targetUrl.searchParams.set("sheet", sheet);
       targetUrl.searchParams.set("assignee", assignee);
+      targetUrl.searchParams.set("pendingOnly", pendingOnly);
     }
 
     const res = await fetch(targetUrl.toString(), {
       method: "GET",
-      headers: {
-        Accept: "application/json",
-      },
+      headers: { Accept: "application/json" },
       redirect: "follow",
       cache: "no-store",
     });
 
     const responseText = await res.text();
 
-    // ตรวจสอบว่า Google Apps Script ส่งกลับมาเป็น JSON หรือติดหน้าขอสิทธิ์ (HTML)
     try {
       const data = JSON.parse(responseText);
       return NextResponse.json(data);
     } catch {
-      if (responseText.includes("ต้องมีสิทธิ์เข้าถึง") || responseText.includes("Sign in")) {
+      if (
+        responseText.includes("ต้องมีสิทธิ์เข้าถึง") ||
+        responseText.includes("Sign in")
+      ) {
         return NextResponse.json(
           {
             success: false,
             error:
-              "Google Apps Script แจ้งเตือน: 'ต้องมีสิทธิ์เข้าถึง' (เกิดจากการตั้งค่า Deploy: ช่อง 'Who has access (ผู้มีสิทธิ์เข้าถึง)' ยังไม่ได้เลือกเป็น 'Anyone (ทุกคน)')",
-            raw: responseText.slice(0, 300),
+              "Google Apps Script แจ้งเตือน: 'ต้องมีสิทธิ์เข้าถึง' (โปรดตั้งค่า Deploy: 'Who has access' ให้เป็น 'Anyone')",
           },
           { status: 403 }
         );

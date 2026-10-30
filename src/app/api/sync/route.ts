@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { syncFolderRequestSchema } from "@/lib/validations/task";
+import { syncFolderBatchRequestSchema } from "@/lib/validations/task";
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
-    // 1. Zod Validation
-    const validation = syncFolderRequestSchema.safeParse(body);
+    const validation = syncFolderBatchRequestSchema.safeParse(body);
     if (!validation.success) {
       return NextResponse.json(
         {
@@ -38,8 +37,6 @@ export async function POST(req: NextRequest) {
       },
       body: JSON.stringify({
         action: "createFolders",
-        sheetName: payload.sheetName,
-        dateFolderName: payload.dateFolderName || payload.sheetName,
         tasks: payload.tasks,
       }),
       redirect: "follow",
@@ -51,7 +48,10 @@ export async function POST(req: NextRequest) {
       const data = JSON.parse(responseText);
       return NextResponse.json(data);
     } catch {
-      if (responseText.includes("ต้องมีสิทธิ์เข้าถึง") || responseText.includes("Sign in")) {
+      if (
+        responseText.includes("ต้องมีสิทธิ์เข้าถึง") ||
+        responseText.includes("Sign in")
+      ) {
         return NextResponse.json(
           {
             success: false,
