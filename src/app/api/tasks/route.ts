@@ -16,100 +16,59 @@ export async function GET(req: NextRequest) {
     }
 
     const gasUrl = process.env.GAS_API_URL;
+    if (!gasUrl || gasUrl.trim() === "") {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "ยังไม่ได้ระบุ GAS_API_URL ในไฟล์ .env.local",
+        },
+        { status: 500 }
+      );
+    }
 
-    // ถ้ามีการตั้งค่า GAS_API_URL ให้ยิงไป Google Apps Script
-    if (gasUrl && gasUrl.trim() !== "") {
-      const targetUrl = new URL(gasUrl);
-      targetUrl.searchParams.set("action", "getTasks");
-      targetUrl.searchParams.set("sheet", sheet);
-      if (assignee) {
-        targetUrl.searchParams.set("assignee", assignee);
-      }
+    const targetUrl = new URL(gasUrl);
+    targetUrl.searchParams.set("action", "getTasks");
+    targetUrl.searchParams.set("sheet", sheet);
+    if (assignee) {
+      targetUrl.searchParams.set("assignee", assignee);
+    }
 
-      const res = await fetch(targetUrl.toString(), {
-        method: "GET",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-      });
+    const res = await fetch(targetUrl.toString(), {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+      },
+      redirect: "follow",
+      cache: "no-store",
+    });
 
-      if (!res.ok) {
+    const responseText = await res.text();
+
+    // ตรวจสอบว่า Google Apps Script ส่งกลับมาเป็น JSON หรือติดหน้าขอสิทธิ์ (HTML)
+    try {
+      const data = JSON.parse(responseText);
+      return NextResponse.json(data);
+    } catch {
+      if (responseText.includes("ต้องมีสิทธิ์เข้าถึง") || responseText.includes("Sign in")) {
         return NextResponse.json(
-          { success: false, error: `Google Apps Script returned ${res.status}` },
-          { status: 502 }
+          {
+            success: false,
+            error:
+              "Google Apps Script แจ้งเตือน: 'ต้องมีสิทธิ์เข้าถึง' (เกิดจากการตั้งค่า Deploy: ช่อง 'Who has access (ผู้มีสิทธิ์เข้าถึง)' ยังไม่ได้เลือกเป็น 'Anyone (ทุกคน)')",
+            raw: responseText.slice(0, 300),
+          },
+          { status: 403 }
         );
       }
 
-      const data = await res.json();
-      return NextResponse.json(data);
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Google Apps Script ตอบกลับไม่ใช่ JSON: ${responseText.slice(0, 200)}`,
+        },
+        { status: 502 }
+      );
     }
-
-    // กรณีที่ยังไม่ได้เชื่อมต่อ GAS_API_URL (โหมด Demo / Preview ข้อมูลจำลองตามรูปภาพ)
-    const mockTasks = [
-      {
-        row: 4,
-        category: "สล็อต",
-        briefLink: "https://drive.google.com/drive/folders/slot-brief",
-        no: 1,
-        taskName: "1_ใหม่มาจองสวรรค์ 1000_0711",
-        uploadUrl: "",
-        team: "A TH",
-        assignee: "ลูกหยี",
-        assignDate: "24/10/26",
-        status: "กำลังทำ",
-        isCompleted: false,
-      },
-      {
-        row: 5,
-        category: "สล็อต",
-        briefLink: "https://drive.google.com/drive/folders/slot-brief",
-        no: 2,
-        taskName: "2_ชนะคอมโบแตกสนั่น_0711",
-        uploadUrl: "",
-        team: "A TH",
-        assignee: "ลูกหยี",
-        assignDate: "24/10/26",
-        status: "กำลังทำ",
-        isCompleted: false,
-      },
-      {
-        row: 14,
-        category: "คาสิโน",
-        briefLink: "https://drive.google.com/drive/folders/casino-brief",
-        no: 2,
-        taskName: "2_น้ำเต้าปูปลา แจกหนัก",
-        uploadUrl: "",
-        team: "A TH",
-        assignee: "ลูกหยี",
-        assignDate: "24/10/26",
-        status: "กำลังทำ",
-        isCompleted: false,
-      },
-      {
-        row: 21,
-        category: "บอล",
-        briefLink: "https://drive.google.com/drive/folders/football-brief",
-        no: 1,
-        taskName: "1 UFABET ศูนย์รวมฟุตบอลออนไลน์ 0711",
-        uploadUrl: "https://drive.google.com/drive/folders/demo-completed",
-        team: "A TH",
-        assignee: "ลูกหยี",
-        assignDate: "24/10/26",
-        status: "เสร็จสิ้น",
-        isCompleted: true,
-      },
-    ];
-
-    const filteredTasks = assignee && assignee !== "ALL"
-      ? mockTasks.filter(t => t.assignee.toLowerCase() === assignee.toLowerCase())
-      : mockTasks;
-
-    return NextResponse.json({
-      success: true,
-      isMock: true,
-      sheetName: sheet,
-      sheets: ["1 พย", "2 พย", "3 พย", "4 พย", "5 พย", "6 พย", "7 พย", "8 พย", "9 พย", "10 พย"],
-      tasks: filteredTasks,
-    });
   } catch (error) {
     return NextResponse.json(
       { success: false, error: (error as Error).message },

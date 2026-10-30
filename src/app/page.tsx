@@ -16,6 +16,7 @@ import {
   CheckSquare,
   Square,
   Search,
+  ShieldAlert,
 } from "lucide-react";
 
 interface Task {
@@ -51,7 +52,7 @@ export default function HomePage() {
   const [selectedRows, setSelectedRows] = useState<number[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
-  const [isMock, setIsMock] = useState<boolean>(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [filterCategory, setFilterCategory] = useState<string>("ALL");
   const [showGuide, setShowGuide] = useState<boolean>(false);
@@ -66,9 +67,10 @@ export default function HomePage() {
     }>;
   } | null>(null);
 
-  // โหลดรายการงานจาก API
+  // โหลดรายการงานจาก Google Sheets จริง
   const fetchTasks = async (targetSheet = sheetName, targetAssignee = assignee) => {
     setIsLoading(true);
+    setErrorMessage(null);
     setSyncResult(null);
     try {
       const res = await fetch(
@@ -77,21 +79,21 @@ export default function HomePage() {
       const data = await res.json();
       if (data.success) {
         setTasks(data.tasks || []);
-        setIsMock(!!data.isMock);
         if (data.sheets && data.sheets.length > 0) {
           setAvailableSheets(data.sheets);
         }
-        // ตั้งค่าเริ่มต้นเลือกเฉพาะงานที่ยังไม่เสร็จ
+        // เลือกเริ่มต้นเฉพาะงานที่ยังไม่เสร็จ
         const pending = (data.tasks || [])
           .filter((t: Task) => !t.isCompleted)
           .map((t: Task) => t.row);
         setSelectedRows(pending);
       } else {
-        alert(data.error || "เกิดข้อผิดพลาดในการดึงข้อมูล");
+        setErrorMessage(data.error || "เกิดข้อผิดพลาดในการดึงข้อมูลจาก Google Sheets");
+        setTasks([]);
       }
     } catch (err) {
       console.error(err);
-      alert("ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้");
+      setErrorMessage("ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ Next.js ได้");
     } finally {
       setIsLoading(false);
     }
@@ -101,7 +103,6 @@ export default function HomePage() {
     fetchTasks();
   }, []);
 
-  // เลือกหรือยกเลิกการเลือกงาน
   const toggleSelectRow = (row: number) => {
     setSelectedRows((prev) =>
       prev.includes(row) ? prev.filter((r) => r !== row) : [...prev, row]
@@ -117,7 +118,7 @@ export default function HomePage() {
     }
   };
 
-  // ยิงคำสั่งสร้างโฟลเดอร์และอัปเดต Google Sheets
+  // ยิงคำสั่งสร้างโฟลเดอร์ใน Google Drive และอัปเดต Google Sheets
   const handleSyncFolders = async () => {
     if (selectedRows.length === 0) {
       alert("กรุณาเลือกงานอย่างน้อย 1 รายการเพื่อสร้างโฟลเดอร์");
@@ -148,7 +149,6 @@ export default function HomePage() {
       const result = await res.json();
       if (result.success) {
         setSyncResult(result);
-        // รีเฟรชรายการงานใหม่
         fetchTasks(sheetName, assignee);
       } else {
         alert(result.message || "เกิดข้อผิดพลาดในการสร้างโฟลเดอร์");
@@ -191,11 +191,9 @@ export default function HomePage() {
                 <h1 className="text-lg font-bold text-slate-900 tracking-tight">
                   Graphic Drive Sync
                 </h1>
-                {isMock && (
-                  <span className="text-[11px] font-medium bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full border border-amber-200">
-                    Preview Demo Mode
-                  </span>
-                )}
+                <span className="text-[11px] font-medium bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-200">
+                  Live Sheets Connected
+                </span>
               </div>
               <p className="text-xs text-slate-500">
                 ระบบจัดการ Google Sheets & Google Drive Automation
@@ -209,7 +207,7 @@ export default function HomePage() {
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
             >
               <HelpCircle className="w-4 h-4 text-slate-500" />
-              <span>วิธีเชื่อมต่อชีต</span>
+              <span>วิธีตั้งค่าสิทธิ์</span>
             </button>
             <a
               href="https://docs.google.com/spreadsheets/d/1WIm3CzQ708nHcdIFQBnQEDBHWjBGeOCQL_MEAO2rBD8/edit"
@@ -227,6 +225,28 @@ export default function HomePage() {
 
       {/* Main Container */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full flex flex-col gap-6">
+        {/* Error Alert Box */}
+        {errorMessage && (
+          <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 flex items-start gap-3">
+            <ShieldAlert className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <h4 className="text-sm font-bold text-rose-900">แจ้งเตือนการเชื่อมต่อ</h4>
+              <p className="text-xs text-rose-700 mt-0.5">{errorMessage}</p>
+              {errorMessage.includes("ต้องมีสิทธิ์เข้าถึง") && (
+                <div className="mt-2 text-xs text-rose-800 bg-white/70 p-2.5 rounded-xl border border-rose-200">
+                  <b>วิธีแก้ (ทำครั้งเดียว):</b>
+                  <ol className="list-decimal ml-4 mt-1 space-y-1">
+                    <li>เปิดหน้า Apps Script ใน Google Sheets</li>
+                    <li>กดปุ่มสีน้ำเงิน <b>Deploy (นำไปใช้งาน)</b> &gt; <b>Manage deployments (จัดการการนำไปใช้งาน)</b></li>
+                    <li>กดไอคอนดินสอแก้ไข เลือก <b>Who has access (ผู้มีสิทธิ์เข้าถึง)</b> ให้เป็น <b>Anyone (ทุกคน)</b></li>
+                    <li>กดบันทึก แล้วกดปุ่ม &quot;รีเฟรชข้อมูล&quot; ในหน้านี้อีกครั้ง</li>
+                  </ol>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Controls Card */}
         <section className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
@@ -234,15 +254,13 @@ export default function HomePage() {
               <label className="block text-xs font-semibold text-slate-600 mb-1.5">
                 👤 ผู้รับงาน (ชื่อคุณ)
               </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={assignee}
-                  onChange={(e) => setAssignee(e.target.value)}
-                  placeholder="เช่น ลูกหยี"
-                  className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-medium"
-                />
-              </div>
+              <input
+                type="text"
+                value={assignee}
+                onChange={(e) => setAssignee(e.target.value)}
+                placeholder="เช่น ลูกหยี"
+                className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-medium"
+              />
             </div>
 
             <div>
@@ -278,14 +296,14 @@ export default function HomePage() {
               </div>
             </div>
 
-            <div className="flex gap-2">
+            <div>
               <button
                 onClick={() => fetchTasks(sheetName, assignee)}
                 disabled={isLoading}
                 className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 active:scale-[0.98] rounded-xl transition-all disabled:opacity-60"
               >
                 <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
-                <span>รีเฟรชข้อมูล</span>
+                <span>รีเฟรชข้อมูลชีต</span>
               </button>
             </div>
           </div>
@@ -295,7 +313,7 @@ export default function HomePage() {
         <section className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs flex items-center justify-between">
             <div>
-              <p className="text-xs font-medium text-slate-500">งานทั้งหมดที่ได้รับ</p>
+              <p className="text-xs font-medium text-slate-500">งานทั้งหมดของ &quot;{assignee}&quot;</p>
               <p className="text-2xl font-bold text-slate-900 mt-0.5">{totalTasks}</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
@@ -404,7 +422,9 @@ export default function HomePage() {
                   <tr>
                     <td colSpan={8} className="py-12 text-center text-slate-400">
                       <AlertCircle className="w-8 h-8 mx-auto mb-2 text-slate-300" />
-                      <p className="font-medium text-slate-600">ไม่พบรายการงาน</p>
+                      <p className="font-medium text-slate-600">
+                        {isLoading ? "กำลังโหลดข้อมูลจากชีต..." : "ไม่พบรายการงาน"}
+                      </p>
                       <p className="text-xs text-slate-400 mt-1">
                         ลองเปลี่ยนวันที่ หรือตรวจสอบชื่อผู้รับงาน
                       </p>
@@ -558,7 +578,7 @@ export default function HomePage() {
             <div className="flex items-center justify-between border-b border-slate-100 pb-4">
               <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
                 <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
-                <span>วิธีเชื่อมต่อกับ Google Sheets จริง</span>
+                <span>วิธีตั้งค่าสิทธิ์ให้เข้าถึงได้</span>
               </h3>
               <button
                 onClick={() => setShowGuide(false)}
@@ -574,9 +594,9 @@ export default function HomePage() {
                   1
                 </span>
                 <div>
-                  <p className="font-semibold text-slate-800">เปิด Apps Script ในชีตของคุณ</p>
+                  <p className="font-semibold text-slate-800">เปิด Apps Script</p>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    เปิด Google Sheet แผ่นงานของคุณ แล้วไปที่เมนูบนสุด: <b>ส่วนขยาย (Extensions)</b> &gt; <b>Apps Script</b>
+                    ไปที่ Google Sheets &gt; ส่วนขยาย &gt; Apps Script
                   </p>
                 </div>
               </div>
@@ -586,39 +606,15 @@ export default function HomePage() {
                   2
                 </span>
                 <div>
-                  <p className="font-semibold text-slate-800">คัดลอกโค้ดไปวาง</p>
+                  <p className="font-semibold text-slate-800">แก้ไขการตั้งค่า Deploy (Who has access)</p>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    คัดลอกโค้ดทั้งหมดจากไฟล์ <code className="bg-slate-100 text-indigo-600 px-1.5 py-0.5 rounded font-mono">google-apps-script/Code.gs</code> ในโปรเจกต์นี้ ไปวางแทนที่ในหน้าต่าง Apps Script แล้วกดไอคอน <b>บันทึก (Save)</b>
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex gap-3">
-                <span className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center shrink-0 text-xs">
-                  3
-                </span>
-                <div>
-                  <p className="font-semibold text-slate-800">นำไปใช้งาน (Deploy as Web App)</p>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    กดปุ่มสีน้ำเงินมุมขวาบน <b>นำไปใช้งาน (Deploy)</b> &gt; <b>การนำไปใช้งานใหม่ (New deployment)</b>
+                    กดปุ่มสีน้ำเงินมุมขวาบน <b>นำไปใช้งาน (Deploy)</b> &gt; <b>จัดการการนำไปใช้งาน (Manage deployments)</b>
                     <br />
-                    - เลือกประเภท: <b>เว็บแอป (Web app)</b>
+                    กดไอคอน <b>ดินสอ (Edit)</b> ทางขวา
                     <br />
-                    - ดำเนินการในฐานะ: <b>ฉัน (Me)</b>
+                    ตรงหัวข้อ <b>ผู้มีสิทธิ์เข้าถึง (Who has access)</b> ให้เปลี่ยนเป็น <b>ทุกคน (Anyone)</b>
                     <br />
-                    - ผู้มีสิทธิ์เข้าถึง: <b>ทุกคน (Anyone)</b>
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex gap-3">
-                <span className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center shrink-0 text-xs">
-                  4
-                </span>
-                <div>
-                  <p className="font-semibold text-slate-800">นำ Web App URL มาใส่ในโปรเจกต์</p>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    คัดลอก URL ที่ได้ (เช่น <code className="bg-slate-100 px-1 py-0.5 rounded">https://script.google.com/macros/s/.../exec</code>) ไปใส่ในไฟล์ <code className="bg-slate-100 text-indigo-600 px-1.5 py-0.5 rounded font-mono">.env.local</code> ตรงช่อง <code className="bg-slate-100 px-1 py-0.5 rounded">GAS_API_URL=...</code> แล้วรีสตาร์ท Next.js
+                    กด <b>นำไปใช้งาน (Deploy)</b>
                   </p>
                 </div>
               </div>

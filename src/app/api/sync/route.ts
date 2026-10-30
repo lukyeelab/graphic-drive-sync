@@ -5,7 +5,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
-    // 1. Zod Validation ตรวจสอบข้อมูลก่อนส่งต่อ
+    // 1. Zod Validation
     const validation = syncFolderRequestSchema.safeParse(body);
     if (!validation.success) {
       return NextResponse.json(
@@ -21,47 +21,55 @@ export async function POST(req: NextRequest) {
     const payload = validation.data;
     const gasUrl = process.env.GAS_API_URL;
 
-    // 2. ถ้ามี GAS_API_URL ให้ส่งต่อไปยัง Google Apps Script
-    if (gasUrl && gasUrl.trim() !== "") {
-      const res = await fetch(gasUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "createFolders",
-          sheetName: payload.sheetName,
-          dateFolderName: payload.dateFolderName || payload.sheetName,
-          tasks: payload.tasks,
-        }),
-      });
+    if (!gasUrl || gasUrl.trim() === "") {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "ยังไม่ได้ระบุ GAS_API_URL ในไฟล์ .env.local",
+        },
+        { status: 500 }
+      );
+    }
 
-      if (!res.ok) {
+    const res = await fetch(gasUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "text/plain;charset=utf-8",
+      },
+      body: JSON.stringify({
+        action: "createFolders",
+        sheetName: payload.sheetName,
+        dateFolderName: payload.dateFolderName || payload.sheetName,
+        tasks: payload.tasks,
+      }),
+      redirect: "follow",
+    });
+
+    const responseText = await res.text();
+
+    try {
+      const data = JSON.parse(responseText);
+      return NextResponse.json(data);
+    } catch {
+      if (responseText.includes("ต้องมีสิทธิ์เข้าถึง") || responseText.includes("Sign in")) {
         return NextResponse.json(
-          { success: false, message: `Google Apps Script returned ${res.status}` },
-          { status: 502 }
+          {
+            success: false,
+            message:
+              "Google Apps Script แจ้งเตือน: 'ต้องมีสิทธิ์เข้าถึง' (โปรดตั้งค่า Deploy: 'Who has access' ให้เป็น 'Anyone')",
+          },
+          { status: 403 }
         );
       }
 
-      const data = await res.json();
-      return NextResponse.json(data);
+      return NextResponse.json(
+        {
+          success: false,
+          message: `Google Apps Script ตอบกลับไม่ใช่ JSON: ${responseText.slice(0, 200)}`,
+        },
+        { status: 502 }
+      );
     }
-
-    // กรณีโหมด Mock / Demo
-    await new Promise((resolve) => setTimeout(resolve, 1500)); // จำลองดีเลย์
-
-    const mockResults = payload.tasks.map((task) => ({
-      row: task.row,
-      taskName: task.taskName,
-      thFolderUrl: `https://drive.google.com/drive/folders/mock-th-${task.row}`,
-      interFolderUrl: `https://drive.google.com/drive/folders/mock-inter-${task.row}`,
-      status: "เสร็จสิ้น",
-    }));
-
-    return NextResponse.json({
-      success: true,
-      isMock: true,
-      message: `[Demo] สร้างโฟลเดอร์สำเร็จ ${mockResults.length} รายการ และเปลี่ยนสถานะเป็น 'เสร็จสิ้น' แล้ว`,
-      updatedTasks: mockResults,
-    });
   } catch (error) {
     return NextResponse.json(
       { success: false, message: (error as Error).message },
