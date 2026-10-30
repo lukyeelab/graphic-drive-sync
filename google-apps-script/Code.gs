@@ -200,6 +200,53 @@ function extractCellLinkAndTitle(val, richText, formula) {
 }
 
 /**
+ * ค้นหา URL ของไฟล์หรือโฟลเดอร์ใบบรีฟใน Google Drive ตามชื่อ (เช่น Google Slides / Docs)
+ */
+function findDriveFileOrFolderUrl(title) {
+  if (!title || typeof title !== "string") return "";
+  const cleanTitle = title.trim();
+  if (!cleanTitle || cleanTitle.length < 2) return "";
+
+  // 1. ลองค้นหาไฟล์ตรงตามชื่อ
+  try {
+    const files = DriveApp.getFilesByName(cleanTitle);
+    while (files.hasNext()) {
+      const f = files.next();
+      if (!f.isTrashed()) {
+        return f.getUrl();
+      }
+    }
+  } catch (e) {}
+
+  // 2. ลองค้นหาแบบตัดช่องว่างส่วนเกิน (เช่น มีเว้นวรรค 2 เคาะ)
+  const normalized = cleanTitle.replace(/\s+/g, " ");
+  if (normalized !== cleanTitle) {
+    try {
+      const files2 = DriveApp.getFilesByName(normalized);
+      while (files2.hasNext()) {
+        const f = files2.next();
+        if (!f.isTrashed()) {
+          return f.getUrl();
+        }
+      }
+    } catch (e) {}
+  }
+
+  // 3. ลองค้นหาเป็นโฟลเดอร์ใน Drive
+  try {
+    const folders = DriveApp.getFoldersByName(cleanTitle);
+    while (folders.hasNext()) {
+      const folder = folders.next();
+      if (!folder.isTrashed()) {
+        return folder.getUrl();
+      }
+    }
+  } catch (e) {}
+
+  return "";
+}
+
+/**
  * ดึง ID ของโฟลเดอร์ Google Drive จากเซลล์ (รองรับ Formula =HYPERLINK, RichText, และ Text)
  */
 function extractDriveFolderFromCell(cell) {
@@ -551,6 +598,14 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
       }
       if (extractedBrief.title) {
         currentBriefTitle = extractedBrief.title;
+      }
+
+      // ค้นหาไฟล์ใบบรีฟใน Google Drive ตามชื่อใบบรีฟอัตโนมัติ
+      if (!currentBriefLink && currentBriefTitle) {
+        const foundBriefUrl = findDriveFileOrFolderUrl(currentBriefTitle);
+        if (foundBriefUrl) {
+          currentBriefLink = foundBriefUrl;
+        }
       }
 
       const rowAssignee = values[rowIdx][CONFIG.COL_ASSIGNEE - 1]?.toString().trim() || "";

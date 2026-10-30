@@ -181,13 +181,16 @@ export async function GET(req: NextRequest) {
           const isUrl = briefLink.startsWith("http://") || briefLink.startsWith("https://");
           if (!isUrl && briefLink) {
             if (!briefTitle) briefTitle = briefLink;
-            briefLink = "";
+            // ถ้ายังไม่ได้ URL ตรง ให้ตั้งเป็นลิงก์ค้นหาไฟล์ใน Google Drive
+            briefLink = `https://drive.google.com/drive/search?q=${encodeURIComponent(briefTitle)}`;
+          } else if (!briefLink && briefTitle) {
+            briefLink = `https://drive.google.com/drive/search?q=${encodeURIComponent(briefTitle)}`;
           }
 
           return {
             ...t,
             briefLink,
-            briefTitle: briefTitle || (isUrl ? "เปิดใบบรีฟ" : briefLink),
+            briefTitle: briefTitle || "เปิดใบบรีฟ",
           };
         });
       }

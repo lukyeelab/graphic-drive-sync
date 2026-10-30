@@ -685,27 +685,32 @@ export default function HomePage() {
                               </span>
                             </td>
                             <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
-                              {task.briefLink && (task.briefLink.startsWith("http://") || task.briefLink.startsWith("https://")) ? (
-                                <a
-                                  href={task.briefLink}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/90 px-2.5 py-1.5 rounded-lg transition-colors group shadow-2xs max-w-[200px]"
-                                  title={`คลิกเปิดใบบรีฟ: ${task.briefTitle || task.briefLink}`}
-                                >
-                                  <ExternalLink className="w-3.5 h-3.5 text-indigo-500 group-hover:text-indigo-700 shrink-0" />
-                                  <span className="truncate">{task.briefTitle || "เปิดใบบรีฟ"}</span>
-                                </a>
-                              ) : task.briefTitle || task.briefLink ? (
-                                <span
-                                  className="text-xs text-slate-600 font-medium bg-slate-100 border border-slate-200/70 px-2.5 py-1.5 rounded-lg inline-block max-w-[200px] truncate"
-                                  title={task.briefTitle || task.briefLink}
-                                >
-                                  📋 {task.briefTitle || task.briefLink}
-                                </span>
-                              ) : (
-                                <span className="text-xs text-slate-400">-</span>
-                              )}
+                              {(() => {
+                                const isDirectUrl = task.briefLink && (task.briefLink.startsWith("http://") || task.briefLink.startsWith("https://"));
+                                const titleText = task.briefTitle || (isDirectUrl ? "" : task.briefLink) || "ใบบรีฟ";
+                                const targetUrl = isDirectUrl
+                                  ? task.briefLink
+                                  : titleText && titleText !== "-"
+                                  ? `https://drive.google.com/drive/search?q=${encodeURIComponent(titleText)}`
+                                  : null;
+
+                                if (targetUrl) {
+                                  return (
+                                    <a
+                                      href={targetUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/90 px-2.5 py-1.5 rounded-lg transition-colors group shadow-2xs max-w-[220px]"
+                                      title={isDirectUrl ? `คลิกเปิดใบบรีฟ: ${titleText}` : `คลิกค้นหาใบบรีฟใน Google Drive: ${titleText}`}
+                                    >
+                                      <ExternalLink className="w-3.5 h-3.5 text-indigo-500 group-hover:text-indigo-700 shrink-0" />
+                                      <span className="truncate">{titleText}</span>
+                                    </a>
+                                  );
+                                }
+
+                                return <span className="text-xs text-slate-400">-</span>;
+                              })()}
                             </td>
                             <td className="py-3 px-3 text-center font-mono font-bold text-slate-700">
                               {task.no || "-"}
