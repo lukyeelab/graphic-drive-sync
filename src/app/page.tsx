@@ -20,6 +20,7 @@ import {
   Calendar,
   User,
   FolderSymlink,
+  Edit3,
 } from "lucide-react";
 
 interface Task {
@@ -51,6 +52,7 @@ const CATEGORY_COLORS: Record<string, { bg: string; text: string; border: string
   "UFA NEWS": { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200" },
   แคมเปญ: { bg: "bg-teal-50", text: "text-teal-700", border: "border-teal-200" },
   กิจกรรมกลาง: { bg: "bg-indigo-50", text: "text-indigo-700", border: "border-indigo-200" },
+  Pretty: { bg: "bg-fuchsia-50", text: "text-fuchsia-700", border: "border-fuchsia-200" },
 };
 
 export default function HomePage() {
@@ -58,10 +60,13 @@ export default function HomePage() {
   const [sheetName, setSheetName] = useState<string>("ALL");
   const [pendingOnly, setPendingOnly] = useState<boolean>(true);
   const [staffList, setStaffList] = useState<string[]>([
-    "ลูกหยี", "บอย", "วิน", "ปั้ม", "แม็กซ์", "เจมมี่", "เบียร์", "อิฟ", "ปอ", "พริม", "แบงค์", "ปอนด์", "จ๊อบ"
+    "ลูกหยี", "บอย", "วิน", "ปั้ม", "แม็กซ์", "เจมมี่", "เบียร์",
+    "อีฟ", "เอิร์น", "ปอ", "พรีม", "แบงค์", "ปอนด์", "จ๊อบ",
+    "แพท", "กิ๊ก", "ภา", "เค้ก", "พี่นาย", "เม่น", "นิว", "มายด์", "เอ้"
   ]);
   const [availableSheets, setAvailableSheets] = useState<string[]>([
-    "7 พย", "8 พย", "6 พย", "5 พย", "4 พย", "3 พย", "2 พย", "1 พย"
+    "15 พย", "14 พย", "13 พย", "12 พย", "11 พย", "10 พย", "9 พย", "8 พย", "7 พย", "6 พย", "5 พย", "4 พย", "3 พย", "2 พย", "1 พย",
+    "31 ตค", "30 ตค", "29 ตค", "28 ตค", "27 ตค", "26 ตค", "25 ตค"
   ]);
 
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -85,20 +90,19 @@ export default function HomePage() {
     }>;
   } | null>(null);
 
-  // สร้าง Key ประจำตัวของแต่ละงาน: sheetName_row
   const getTaskKey = (sheet: string, row: number) => `${sheet}_${row}`;
 
-  // โหลดรายชื่อพนักงานและแท็บวันที่ทั้งหมด
+  // โหลดรายชื่อพนักงานและแท็บวันที่ทั้งหมดจากชีตจริง
   const loadMetadata = async () => {
     try {
       const res = await fetch("/api/tasks?action=getMetadata");
       const data = await res.json();
       if (data.success) {
-        if (data.staffList && data.staffList.length > 0) {
-          setStaffList(data.staffList);
-        }
         if (data.sheetNames && data.sheetNames.length > 0) {
           setAvailableSheets(data.sheetNames);
+        }
+        if (data.staffList && data.staffList.length > 0) {
+          setStaffList(data.staffList);
         }
       }
     } catch (e) {
@@ -106,7 +110,7 @@ export default function HomePage() {
     }
   };
 
-  // โหลดรายการงานตามชื่อพนักงาน (ค้นหาข้ามทุกวันที่ หรือเฉพาะวันที่เลือก)
+  // โหลดรายการงานตามชื่อพนักงาน
   const fetchTasks = async (targetAssignee = assignee, targetSheet = sheetName, isPending = pendingOnly) => {
     setIsLoading(true);
     setErrorMessage(null);
@@ -122,7 +126,6 @@ export default function HomePage() {
         const loadedTasks: Task[] = data.tasks || [];
         setTasks(loadedTasks);
 
-        // กำหนดค่าเริ่มต้นให้กับชื่อโฟลเดอร์ของแต่ละงาน
         const nameMap: Record<string, string> = {};
         const pendingKeys: string[] = [];
         loadedTasks.forEach((t) => {
@@ -147,9 +150,22 @@ export default function HomePage() {
   };
 
   useEffect(() => {
+    // โหลดชื่อที่เคยจำไว้ใน LocalStorage
+    const savedName = localStorage.getItem("gds_assignee");
+    if (savedName) {
+      setAssignee(savedName);
+      fetchTasks(savedName, sheetName, pendingOnly);
+    } else {
+      fetchTasks();
+    }
     loadMetadata();
-    fetchTasks();
   }, []);
+
+  const handleAssigneeChange = (newName: string) => {
+    setAssignee(newName);
+    localStorage.setItem("gds_assignee", newName);
+    fetchTasks(newName, sheetName, pendingOnly);
+  };
 
   const toggleSelectTask = (key: string) => {
     setSelectedTaskKeys((prev) =>
@@ -169,7 +185,6 @@ export default function HomePage() {
     }
   };
 
-  // สร้างโฟลเดอร์และอัปเดตชีต (รองรับหลายวันพร้อมกัน)
   const handleSyncFolders = async () => {
     if (selectedTaskKeys.length === 0) {
       alert("กรุณาเลือกงานอย่างน้อย 1 รายการเพื่อสร้างโฟลเดอร์");
@@ -214,7 +229,6 @@ export default function HomePage() {
     }
   };
 
-  // กรองค้นหา
   const filteredTasks = tasks.filter((t) => {
     const matchSearch =
       searchTerm === "" ||
@@ -224,7 +238,6 @@ export default function HomePage() {
     return matchSearch;
   });
 
-  // จัดกลุ่มงานตามวันที่ (SheetName)
   const groupedTasksByDate: Record<string, Task[]> = {};
   filteredTasks.forEach((t) => {
     if (!groupedTasksByDate[t.sheetName]) {
@@ -252,7 +265,7 @@ export default function HomePage() {
                   Graphic Drive Sync
                 </h1>
                 <span className="text-[11px] font-semibold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-200">
-                  Live Sheets Connected
+                  {availableSheets.length} วันที่ / {staffList.length} พนักงาน
                 </span>
               </div>
               <p className="text-xs text-slate-500">
@@ -299,7 +312,7 @@ export default function HomePage() {
                     <li>เปิดหน้า Apps Script ใน Google Sheets</li>
                     <li>กดปุ่ม <b>Deploy (นำไปใช้งาน)</b> &gt; <b>Manage deployments</b></li>
                     <li>กดไอคอนดินสอแก้ไข เลือก <b>Who has access</b> ให้เป็น <b>Anyone (ทุกคน)</b></li>
-                    <li>กดบันทึก แล้วกดปุ่ม &quot;ค้นหางานของฉัน&quot; ในหน้านี้อีกครั้ง</li>
+                    <li>กดบันทึก แล้วกดปุ่ม &quot;ค้นหางานของฉัน&quot; อีกครั้ง</li>
                   </ol>
                 </div>
               )}
@@ -310,33 +323,37 @@ export default function HomePage() {
         {/* Filter Controls Card */}
         <section className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+            {/* Staff Selector (Combo: Dropdown + Free Typing) */}
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1.5 flex items-center gap-1.5">
-                <User className="w-3.5 h-3.5 text-indigo-600" />
-                <span>ชื่อพนักงาน / กราฟิก</span>
-              </label>
-              <div className="flex gap-1.5">
-                <select
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                  <User className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>ชื่อพนักงาน / กราฟิก</span>
+                </label>
+                <span className="text-[10px] text-slate-400">เลือกหรือพิมพ์ชื่อ</span>
+              </div>
+              <div className="relative">
+                <input
+                  type="text"
+                  list="staff-options"
                   value={assignee}
-                  onChange={(e) => {
-                    setAssignee(e.target.value);
-                    fetchTasks(e.target.value, sheetName, pendingOnly);
-                  }}
-                  className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-semibold text-indigo-900"
-                >
+                  onChange={(e) => handleAssigneeChange(e.target.value)}
+                  placeholder="พิมพ์หรือเลือกชื่อ..."
+                  className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-semibold text-indigo-950"
+                />
+                <datalist id="staff-options">
                   {staffList.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
+                    <option key={s} value={s} />
                   ))}
-                </select>
+                </datalist>
               </div>
             </div>
 
+            {/* Date Selector (All + Sorted Sheets) */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1.5 flex items-center gap-1.5">
                 <Calendar className="w-3.5 h-3.5 text-indigo-600" />
-                <span>วันที่ต้องการค้นหา</span>
+                <span>วันที่ต้องการค้นหา ({availableSheets.length} วัน)</span>
               </label>
               <select
                 value={sheetName}
@@ -595,18 +612,21 @@ export default function HomePage() {
                               {task.no || "-"}
                             </td>
                             <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
-                              <input
-                                type="text"
-                                value={taskNamesMap[key] || ""}
-                                onChange={(e) => {
-                                  setTaskNamesMap((prev) => ({
-                                    ...prev,
-                                    [key]: e.target.value,
-                                  }));
-                                }}
-                                placeholder="พิมพ์ชื่องาน เช่น 1_ใหม่มาจองสวรรค์"
-                                className="w-full px-2.5 py-1.5 text-xs font-medium bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
-                              />
+                              <div className="relative">
+                                <input
+                                  type="text"
+                                  value={taskNamesMap[key] || ""}
+                                  onChange={(e) => {
+                                    setTaskNamesMap((prev) => ({
+                                      ...prev,
+                                      [key]: e.target.value,
+                                    }));
+                                  }}
+                                  placeholder="พิมพ์ชื่องาน เช่น 1_ใหม่มาจองสวรรค์"
+                                  className="w-full px-2.5 py-1.5 text-xs font-medium bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all pr-7"
+                                />
+                                <Edit3 className="w-3.5 h-3.5 text-slate-300 absolute right-2 top-2 pointer-events-none" />
+                              </div>
                             </td>
                             <td className="py-3 px-4 text-center">
                               {task.isCompleted ? (
