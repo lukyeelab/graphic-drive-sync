@@ -800,7 +800,7 @@ const renderDateCheckbox = (s: string) => {
                   : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
               }`}
             >
-              🌐 ทุกเดือน ({availableSheets.length > 0 ? availableSheets.length : 52} วัน)
+              ทุกเดือน ({availableSheets.length > 0 ? availableSheets.length : 52} วัน)
             </button>
             <button
               type="button"
@@ -814,7 +814,7 @@ const renderDateCheckbox = (s: string) => {
                   : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
               }`}
             >
-              🍁 เดือน พ.ย. ({monthGroups.nov.length} วัน)
+              เดือน พ.ย. ({monthGroups.nov.length} วัน)
             </button>
             <button
               type="button"
@@ -828,7 +828,7 @@ const renderDateCheckbox = (s: string) => {
                   : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
               }`}
             >
-              🎃 เดือน ต.ค. ({monthGroups.oct.length} วัน)
+              เดือน ต.ค. ({monthGroups.oct.length} วัน)
             </button>
           </div>
 
@@ -884,14 +884,14 @@ const renderDateCheckbox = (s: string) => {
                   {isMetadataLoading ? (
                     <span className="text-slate-400">⏳ กำลังดึงวันที่...</span>
                   ) : selectedSheets.includes("ALL") ? (
-                    <span className="text-indigo-700 font-bold">🌐 ทุกวันที่ (ALL)</span>
+                    <span className="text-indigo-700 font-bold">ทุกวันที่ (ALL)</span>
                   ) : selectedSheets.length === 0 ? (
                     <span className="text-slate-400">เลือกวันที่...</span>
                   ) : selectedSheets.length <= 2 ? (
-                    <span>📅 {selectedSheets.join(", ")}</span>
+                    <span>{selectedSheets.join(", ")}</span>
                   ) : (
                     <span>
-                      📅 {selectedSheets.slice(0, 2).join(", ")}{" "}
+                      {selectedSheets.slice(0, 2).join(", ")}{" "}
                       <span className="text-xs text-indigo-600 font-bold">
                         (+{selectedSheets.length - 2})
                       </span>
@@ -931,7 +931,7 @@ const renderDateCheckbox = (s: string) => {
                           : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
                       }`}
                     >
-                      ⚡ วันนี้
+                      วันนี้
                     </button>
                     <button
                       type="button"
@@ -942,7 +942,7 @@ const renderDateCheckbox = (s: string) => {
                           : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
                       }`}
                     >
-                      ⚡ 3 วันล่าสุด
+                      3 วันล่าสุด
                     </button>
                     <button
                       type="button"
@@ -956,7 +956,7 @@ const renderDateCheckbox = (s: string) => {
                           : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
                       }`}
                     >
-                      🍁 ทั้งเดือน พ.ย.
+                      ทั้งเดือน พ.ย.
                     </button>
                     <button
                       type="button"
@@ -970,7 +970,7 @@ const renderDateCheckbox = (s: string) => {
                           : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
                       }`}
                     >
-                      🎃 ทั้งเดือน ต.ค.
+                      ทั้งเดือน ต.ค.
                     </button>
                   </div>
                   <button
@@ -982,7 +982,7 @@ const renderDateCheckbox = (s: string) => {
                         : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
                     }`}
                   >
-                    🌐 ทุกวันที่ทุกเดือน (ALL - 52 วัน)
+                    ทุกวันที่ทุกเดือน (ALL - 52 วัน)
                   </button>
 
                   {/* Scrollable Date Checkbox List Grouped by Month */}
@@ -998,7 +998,7 @@ const renderDateCheckbox = (s: string) => {
                           <div>
                             <div className="flex items-center justify-between px-2 py-1 bg-slate-100 rounded-lg mb-1 sticky top-0 z-10 shadow-2xs">
                               <span className="text-[11px] font-bold text-slate-700">
-                                🍁 เดือน พ.ย. ({monthGroups.nov.length} วัน)
+                                เดือน พ.ย. ({monthGroups.nov.length} วัน)
                               </span>
                               <button
                                 type="button"
@@ -1021,7 +1021,7 @@ const renderDateCheckbox = (s: string) => {
                           <div>
                             <div className="flex items-center justify-between px-2 py-1 bg-slate-100 rounded-lg mb-1 sticky top-0 z-10 shadow-2xs">
                               <span className="text-[11px] font-bold text-slate-700">
-                                🎃 เดือน ต.ค. ({monthGroups.oct.length} วัน)
+                                เดือน ต.ค. ({monthGroups.oct.length} วัน)
                               </span>
                               <button
                                 type="button"
@@ -1044,7 +1044,7 @@ const renderDateCheckbox = (s: string) => {
                           <div>
                             <div className="flex items-center justify-between px-2 py-1 bg-slate-100 rounded-lg mb-1 sticky top-0 z-10 shadow-2xs">
                               <span className="text-[11px] font-bold text-slate-700">
-                                📁 แผ่นงานอื่นๆ ({monthGroups.other.length} แผ่น)
+                                แผ่นงานอื่นๆ ({monthGroups.other.length} แผ่น)
                               </span>
                               <button
                                 type="button"
@@ -1216,7 +1216,7 @@ const renderDateCheckbox = (s: string) => {
                       >
                         <div className="flex items-center justify-between font-semibold text-slate-800 text-xs">
                           <span className="truncate mr-2 font-mono text-indigo-900 font-bold">
-                            📅 {item.sheetName} | แถว #{item.row} | {item.taskName}
+                            {item.sheetName} | แถว #{item.row} | {item.taskName}
                           </span>
                           <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full shrink-0">
                             เสร็จสิ้น
@@ -1226,7 +1226,7 @@ const renderDateCheckbox = (s: string) => {
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-slate-100">
                           {/* TH Link Button */}
                           <div className="flex items-center gap-1.5 bg-emerald-50/60 p-2 rounded-lg border border-emerald-100">
-                            <span className="text-base shrink-0">🇹🇭</span>
+                            <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded shrink-0">TH</span>
                             <div className="flex-1 min-w-0">
                               <p className="text-[10px] font-bold text-emerald-900">โฟลเดอร์ TH</p>
                               <a
@@ -1250,7 +1250,7 @@ const renderDateCheckbox = (s: string) => {
 
                           {/* INTER Link Button */}
                           <div className="flex items-center gap-1.5 bg-sky-50/60 p-2 rounded-lg border border-sky-100">
-                            <span className="text-base shrink-0">🌐</span>
+                            <span className="text-xs font-bold text-sky-700 bg-sky-100 px-1.5 py-0.5 rounded shrink-0">INTER</span>
                             <div className="flex-1 min-w-0">
                               <p className="text-[10px] font-bold text-sky-900">โฟลเดอร์ INTER</p>
                               {item.interFolderUrl ? (
@@ -1280,10 +1280,10 @@ const renderDateCheckbox = (s: string) => {
                         </div>
 
                         {copiedLink && copiedLink.startsWith(`th_${idx}`) && (
-                          <span className="text-[10px] text-emerald-600 font-medium">✓ คัดลอกลิงก์ TH เรียบร้อย</span>
+                          <span className="text-[10px] text-emerald-600 font-medium">คัดลอกลิงก์ TH เรียบร้อย</span>
                         )}
                         {copiedLink && copiedLink.startsWith(`inter_${idx}`) && (
-                          <span className="text-[10px] text-sky-600 font-medium">✓ คัดลอกลิงก์ INTER เรียบร้อย</span>
+                          <span className="text-[10px] text-sky-600 font-medium">คัดลอกลิงก์ INTER เรียบร้อย</span>
                         )}
                       </div>
                     ))}
@@ -1318,7 +1318,7 @@ const renderDateCheckbox = (s: string) => {
                 <CheckCircle2 className="w-6 h-6" />
               </div>
               <h4 className="text-base font-extrabold text-emerald-900">
-                ยอดเยี่ยมมาก! งานทั้งหมดของ &quot;{assignee}&quot; ในวันที่ {sheetName} เสร็จสิ้นครบแล้ว 🎉
+                ยอดเยี่ยมมาก! งานทั้งหมดของ &quot;{assignee}&quot; ในวันที่ {sheetName} เสร็จสิ้นครบแล้ว
               </h4>
               <p className="text-xs text-emerald-700 mt-1.5 max-w-md mx-auto leading-relaxed">
                 คุณได้สร้างโฟลเดอร์และอัปงานครบแล้วทั้ง <b>{completedTasks}</b> รายการ ไม่มีงานที่ยังค้างอยู่
@@ -1340,7 +1340,7 @@ const renderDateCheckbox = (s: string) => {
                 ไม่พบงานที่มอบหมายให้ &quot;{assignee}&quot; ในแผ่นงาน {sheetName}
               </h4>
               <p className="text-xs text-slate-400 mt-1">
-                ลองตรวจสอบชื่อผู้รับงาน หรือเลือก <b>&quot;🔍 ทุกวันที่ (ค้นหางานค้างข้ามแท็บ)&quot;</b> เพื่อค้นหา
+                ลองตรวจสอบชื่อผู้รับงาน หรือเลือก <b>&quot;ทุกวันที่ (ค้นหางานค้างข้ามแท็บ)&quot;</b> เพื่อค้นหา
               </p>
               <button
                 onClick={() => {
@@ -1575,7 +1575,7 @@ const renderDateCheckbox = (s: string) => {
                                         className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100/90 border border-emerald-200/90 px-2 py-1 rounded-lg transition-all shadow-2xs hover:shadow-xs group whitespace-nowrap"
                                         title="คลิกเพื่อเปิดโฟลเดอร์ Google Drive (TH)"
                                       >
-                                        <span>🇹🇭 เปิด TH</span>
+                                        <span>เปิด TH</span>
                                         <ExternalLink className="w-3 h-3 text-emerald-500 group-hover:text-emerald-700 shrink-0" />
                                       </a>
                                     ) : null}
@@ -1588,7 +1588,7 @@ const renderDateCheckbox = (s: string) => {
                                         className="inline-flex items-center gap-1 text-[11px] font-bold text-sky-700 hover:text-sky-900 bg-sky-50 hover:bg-sky-100/90 border border-sky-200/90 px-2 py-1 rounded-lg transition-all shadow-2xs hover:shadow-xs group whitespace-nowrap"
                                         title="คลิกเพื่อเปิดโฟลเดอร์ Google Drive (INTER)"
                                       >
-                                        <span>🌐 เปิด INTER</span>
+                                        <span>เปิด INTER</span>
                                         <ExternalLink className="w-3 h-3 text-sky-500 group-hover:text-sky-700 shrink-0" />
                                       </a>
                                     ) : null}
@@ -1658,7 +1658,7 @@ const renderDateCheckbox = (s: string) => {
                 onClick={() => setShowGuide(false)}
                 className="text-slate-400 hover:text-slate-600 text-sm font-bold px-2 py-1"
               >
-                ✕ ปิด
+                ปิด
               </button>
             </div>
 
