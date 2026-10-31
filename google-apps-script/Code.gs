@@ -1443,8 +1443,9 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force) {
             }
           }
 
-          const hasNameOrLink = !!(uploadUrl || uploadCellText);
-          const isCompleted = hasNameOrLink ? (status.includes("เสร็จสิ้น") || uploadUrl !== "") : false;
+          const hasName = !!(uploadCellText && uploadCellText.trim() !== "");
+          const hasLink = !!(uploadUrl && uploadUrl.trim() !== "");
+          const isCompleted = (hasName && hasLink) ? (status.includes("เสร็จสิ้น") || uploadUrl !== "") : false;
           let taskBriefLink = fastFormatPresentationUrl(currentBriefLink);
           if (!taskBriefLink && currentBriefTitle) {
             if (briefSlideMemCache[currentBriefTitle] !== undefined) {
@@ -1477,7 +1478,7 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force) {
             team: team,
             assignee: rowAssignee,
             assignDate: assignDate,
-            status: status || "กำลังทำ",
+            status: status,
             isCompleted: isCompleted,
           });
         }
@@ -1556,8 +1557,9 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force) {
             interFolderUrl = noteMatch[1].trim();
           }
 
-          const hasNameOrLink = !!(uploadUrl || uploadCellText);
-          const isCompleted = hasNameOrLink ? (status.includes("เสร็จสิ้น") || uploadUrl !== "") : false;
+          const hasName = !!(uploadCellText && uploadCellText.trim() !== "");
+          const hasLink = !!(uploadUrl && uploadUrl.trim() !== "");
+          const isCompleted = (hasName && hasLink) ? (status.includes("เสร็จสิ้น") || uploadUrl !== "") : false;
           let taskBriefLink = fastFormatPresentationUrl(currentBriefLink);
           if (!taskBriefLink && currentBriefTitle) {
             if (briefSlideMemCache[currentBriefTitle] !== undefined) {
@@ -1590,7 +1592,7 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force) {
             team: team,
             assignee: rowAssignee,
             assignDate: assignDate instanceof Date ? Utilities.formatDate(assignDate, "GMT+7", "dd/MM/yyyy") : assignDate,
-            status: status || "กำลังทำ",
+            status: status,
             isCompleted: isCompleted,
           });
         }

@@ -172,7 +172,7 @@ export default function HomePage() {
   const getTaskKey = (sheet: string, row: number) => `${sheet}_${row}`;
 
   const cleanStatus = (status?: string): string => {
-    if (!status) return "กำลังทำ";
+    if (!status) return "";
     return status
       .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F1E6}-\u{1F1FF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{2300}-\u{23FF}]/gu, "")
       .trim();
@@ -191,20 +191,17 @@ export default function HomePage() {
       ? allTasks.filter((t) => (t.assignee || "").toLowerCase().includes(searchLower))
       : allTasks;
 
-    // ถ้างานไหนยังไม่มีทั้งชื่อและลิงก์งาน คืองานยังไม่เสร็จ (isCompleted: false) เสมอ
+    // ถ้างานไหนยังไม่มีทั้งลิ้งก์และชื่อโฟลเดอร์บนชีต ให้ตีว่ายังไม่เสร็จ (isCompleted: false) จนกว่าจะมีทั้งคู่
     const loadedTasks = rawLoaded.map((t) => {
       const hasName = !!(t.taskName && t.taskName.trim() !== "");
       const hasLink = !!(t.uploadUrl && t.uploadUrl.trim() !== "");
-      const isMissingNameAndLink = !hasName && !hasLink;
-      const reallyCompleted = isMissingNameAndLink ? false : t.isCompleted;
-      const effectiveStatus = isMissingNameAndLink && (t.status || "").includes("เสร็จสิ้น")
-        ? "กำลังทำ"
-        : (t.status || "กำลังทำ");
+      const hasBothLinkAndName = hasName && hasLink;
+      const reallyCompleted = hasBothLinkAndName ? t.isCompleted : false;
 
       return {
         ...t,
         isCompleted: reallyCompleted,
-        status: effectiveStatus,
+        status: t.status || "", // ใช้สถานะตามจริงจาก Col L บนชีตเสมอ
       };
     });
 
@@ -243,20 +240,17 @@ export default function HomePage() {
       ? newBatchTasks.filter((t) => (t.assignee || "").toLowerCase().includes(searchLower))
       : newBatchTasks;
 
-    // ถ้างานไหนยังไม่มีทั้งชื่อและลิงก์งาน คืองานยังไม่เสร็จ (isCompleted: false) เสมอ
+    // ถ้างานไหนยังไม่มีทั้งลิ้งก์และชื่อโฟลเดอร์บนชีต ให้ตีว่ายังไม่เสร็จ (isCompleted: false) จนกว่าจะมีทั้งคู่
     const filteredNew = rawFiltered.map((t) => {
       const hasName = !!(t.taskName && t.taskName.trim() !== "");
       const hasLink = !!(t.uploadUrl && t.uploadUrl.trim() !== "");
-      const isMissingNameAndLink = !hasName && !hasLink;
-      const reallyCompleted = isMissingNameAndLink ? false : t.isCompleted;
-      const effectiveStatus = isMissingNameAndLink && (t.status || "").includes("เสร็จสิ้น")
-        ? "กำลังทำ"
-        : (t.status || "กำลังทำ");
+      const hasBothLinkAndName = hasName && hasLink;
+      const reallyCompleted = hasBothLinkAndName ? t.isCompleted : false;
 
       return {
         ...t,
         isCompleted: reallyCompleted,
-        status: effectiveStatus,
+        status: t.status || "", // ใช้สถานะตามจริงจาก Col L บนชีตเสมอ
       };
     });
 
@@ -637,7 +631,14 @@ export default function HomePage() {
 
   const handleSelectAllPending = () => {
     const pendingKeys = filteredTasks
-      .filter((t) => !t.isCompleted)
+      .filter((t) => {
+        const key = getTaskKey(t.sheetName, t.row);
+        const thUrl = (folderLinksMap[key]?.thUrl || t.uploadUrl || "").trim();
+        const taskNameCurrent = (taskNamesMap[key] || t.taskName || "").trim();
+        const hasBothLinkAndName = !!thUrl && !!taskNameCurrent;
+        const isReallyCompleted = hasBothLinkAndName ? t.isCompleted : false;
+        return !isReallyCompleted;
+      })
       .map((t) => getTaskKey(t.sheetName, t.row));
 
     if (selectedTaskKeys.length === pendingKeys.length) {
@@ -785,9 +786,9 @@ export default function HomePage() {
     const key = getTaskKey(t.sheetName, t.row);
     const thUrl = (folderLinksMap[key]?.thUrl || t.uploadUrl || "").trim();
     const taskNameCurrent = (taskNamesMap[key] || t.taskName || "").trim();
-    // ถ้างานไหนยังไม่มีชื่อและลิงก์งาน คืองานยังไม่เสร็จ (isCompleted: false)
-    const isMissingNameAndLink = !thUrl && !taskNameCurrent;
-    const isReallyCompleted = isMissingNameAndLink ? false : t.isCompleted;
+    // ถ้างานไหนยังไม่มีทั้งลิ้งก์และชื่อโฟลเดอร์บนชีต ให้ตีว่ายังไม่เสร็จ (isCompleted: false) จนกว่าจะมีทั้งคู่
+    const hasBothLinkAndName = !!thUrl && !!taskNameCurrent;
+    const isReallyCompleted = hasBothLinkAndName ? t.isCompleted : false;
 
     // หากงานเพิ่งเสร็จในรอบนี้ (justCompletedKeys) ให้แสดงไว้เสมอ ไม่ให้แถวหายไป แม้จะเปิด "เลือกเฉพาะงานที่ยังไม่เสร็จ"
     if (pendingOnly && isReallyCompleted && !justCompletedKeys.has(key)) {
@@ -856,8 +857,10 @@ const renderDateCheckbox = (s: string) => {
     const key = getTaskKey(t.sheetName, t.row);
     const thUrl = (folderLinksMap[key]?.thUrl || t.uploadUrl || "").trim();
     const taskNameCurrent = (taskNamesMap[key] || t.taskName || "").trim();
-    const isMissingNameAndLink = !thUrl && !taskNameCurrent;
-    return isMissingNameAndLink ? true : !t.isCompleted;
+    // ถ้ายังไม่มีทั้งลิ้งก์และชื่อโฟลเดอร์ ให้ตีว่ายังไม่เสร็จ (เพิ่มไปที่การ์ดสรุป รอสร้างโฟลเดอร์)
+    const hasBothLinkAndName = !!thUrl && !!taskNameCurrent;
+    const isReallyCompleted = hasBothLinkAndName ? t.isCompleted : false;
+    return !isReallyCompleted;
   }).length;
   const completedTasks = totalTasks - pendingTasks;
 
@@ -1628,11 +1631,6 @@ const renderDateCheckbox = (s: string) => {
                             </td>
                             <td className="py-3.5 px-3 text-center whitespace-nowrap">
                               {(() => {
-                                const thUrl = (folderLinksMap[key]?.thUrl || task.uploadUrl || "").trim();
-                                const taskNameCurrent = (taskNamesMap[key] || task.taskName || "").trim();
-                                const isMissingNameAndLink = !thUrl && !taskNameCurrent;
-                                const isReallyCompleted = isMissingNameAndLink ? false : task.isCompleted;
-
                                 if (isSyncingThis) {
                                   return (
                                     <span className="inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-[#F8EFEA] text-[#8C3A27] border border-[#EACEC3] shadow-2xs">
@@ -1642,11 +1640,25 @@ const renderDateCheckbox = (s: string) => {
                                   );
                                 }
 
-                                if (isReallyCompleted) {
+                                const rawStatus = cleanStatus(task.status);
+                                const displayStatus = rawStatus || "-";
+                                const isStatusDone = displayStatus.includes("เสร็จ");
+                                const isStatusReview = displayStatus.includes("ตรวจ") || displayStatus.includes("แก้");
+
+                                if (isStatusDone) {
                                   return (
                                     <span className="inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-[#EFF5F0] text-[#34603B] border border-[#D1E4D4] shadow-2xs">
                                       <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-[#34603B]" />
-                                      <span>เสร็จสิ้น</span>
+                                      <span>{displayStatus}</span>
+                                    </span>
+                                  );
+                                }
+
+                                if (isStatusReview) {
+                                  return (
+                                    <span className="inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-[#EEF2F6] text-[#2D5A8C] border border-[#D0DDEB] shadow-2xs">
+                                      <Clock className="w-3.5 h-3.5 shrink-0 text-[#2D5A8C]" />
+                                      <span>{displayStatus}</span>
                                     </span>
                                   );
                                 }
@@ -1654,7 +1666,7 @@ const renderDateCheckbox = (s: string) => {
                                 return (
                                   <span className="inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-[#FAF4EB] text-[#8C6228] border border-[#EADFCB] shadow-2xs">
                                     <Clock className="w-3.5 h-3.5 shrink-0 text-[#8C6228]" />
-                                    <span>{cleanStatus(task.status) || "กำลังทำ"}</span>
+                                    <span>{displayStatus}</span>
                                   </span>
                                 );
                               })()}
