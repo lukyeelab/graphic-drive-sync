@@ -605,28 +605,22 @@ export default function HomePage() {
 
     // เตรียมข้อมูลงานที่จะส่งไปสร้าง/เชื่อมโยงโฟลเดอร์
     // หากช่องชื่องานว่างอยู่ จะใช้ชื่อเริ่มต้นตามลำดับงานและหมวดหมู่โดยอัตโนมัติ (เช่น 5_กีฬาอื่นๆ) เพื่อความสะดวก
-    const updatedNames: Record<string, string> = {};
     const tasksToSync = selectedTasks.map((t) => {
       const key = getTaskKey(t.sheetName, t.row);
       const inputName = (taskNamesMap[key] || t.taskName || "").trim();
       const defaultName = `${t.no || 1}_${t.category || "ทั่วไป"}`;
       const finalName = inputName || defaultName;
-      if (!inputName) {
-        updatedNames[key] = finalName;
-      }
+      const isCustomName = !!inputName && inputName !== defaultName;
       return {
         sheetName: t.sheetName,
         row: t.row,
         category: t.category,
         no: t.no,
         taskName: finalName,
+        isCustomName: isCustomName,
         existingUrl: t.uploadUrl || folderLinksMap[key]?.thUrl || "",
       };
     });
-
-    if (Object.keys(updatedNames).length > 0) {
-      setTaskNamesMap((prev) => ({ ...prev, ...updatedNames }));
-    }
 
     const keysToSync = selectedTasks.map((t) => getTaskKey(t.sheetName, t.row));
     setSyncingTaskKeys(keysToSync);
@@ -647,6 +641,7 @@ export default function HomePage() {
 
         if (result.updatedTasks && Array.isArray(result.updatedTasks)) {
           const newLinks: Record<string, { thUrl?: string; interUrl?: string }> = {};
+          const updatedRealNames: Record<string, string> = {};
           const nextCompleted = new Set(justCompletedKeys);
 
           result.updatedTasks.forEach((u: any) => {
@@ -655,8 +650,16 @@ export default function HomePage() {
               thUrl: u.thFolderUrl || "",
               interUrl: u.interFolderUrl || "",
             };
+            if (u.taskName) {
+              updatedRealNames[key] = u.taskName;
+            }
             nextCompleted.add(key);
           });
+
+          // อัปเดตชื่องานจริงที่ก๊อปปี้มาจาก Google Drive ทันที
+          if (Object.keys(updatedRealNames).length > 0) {
+            setTaskNamesMap((prev) => ({ ...prev, ...updatedRealNames }));
+          }
 
           // บันทึกรายการงานที่เพิ่งทำเสร็จ เพื่อไม่ให้แถวหายไปจากตาราง
           setJustCompletedKeys(nextCompleted);
@@ -671,6 +674,7 @@ export default function HomePage() {
               if (u) {
                 return {
                   ...t,
+                  taskName: u.taskName || t.taskName,
                   uploadUrl: u.thFolderUrl || t.uploadUrl,
                   interFolderUrl: u.interFolderUrl || t.interFolderUrl,
                   hasUploadLink: !!u.thFolderUrl,

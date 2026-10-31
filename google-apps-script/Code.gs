@@ -2013,7 +2013,7 @@ function createFoldersAndSyncBatch(payload) {
           const existingF = DriveApp.getFolderById(existingThFolderId);
           if (existingF && !existingF.isTrashed()) {
             thTaskFolder = existingF;
-            if (thTaskFolder.getName() !== taskName.trim()) {
+            if (task.isCustomName && thTaskFolder.getName() !== taskName.trim()) {
               thTaskFolder.setName(taskName.trim());
             }
           }
@@ -2031,10 +2031,12 @@ function createFoldersAndSyncBatch(payload) {
         thTaskFolder = getOrCreateFolderSmart(thCatFolder, taskName, thAliases, {
           taskNo: task.no
         });
-        if (thTaskFolder && thTaskFolder.getName() !== taskName.trim()) {
+        if (task.isCustomName && thTaskFolder && thTaskFolder.getName() !== taskName.trim()) {
           try { thTaskFolder.setName(taskName.trim()); } catch (e) {}
         }
       }
+      // ก๊อปปี้ชื่อโฟลเดอร์เดิมจริงจาก Google Drive มาใช้เสมอ เพื่อให้ได้ชื่อโฟลเดอร์เดิมที่ถูกต้อง 100%
+      const finalTaskName = thTaskFolder ? thTaskFolder.getName() : taskName;
       const thUrl = thTaskFolder ? thTaskFolder.getUrl() : "";
 
       // 6. โฟลเดอร์งานฝั่ง INTER
@@ -2080,7 +2082,7 @@ function createFoldersAndSyncBatch(payload) {
 
       sheetUpdates.push({
         row: row,
-        taskName: taskName,
+        taskName: finalTaskName,
         thUrl: thUrl,
         interUrl: interUrl
       });
@@ -2088,7 +2090,7 @@ function createFoldersAndSyncBatch(payload) {
       results.push({
         sheetName: sName,
         row: row,
-        taskName: taskName,
+        taskName: finalTaskName,
         thFolderUrl: thUrl,
         interFolderUrl: interUrl,
         status: "เสร็จสิ้น",
@@ -2224,7 +2226,7 @@ function repairMissingThLinks(sheetName) {
           const noteMatch = note.match(/INTER:\s*(https:\/\/[^\s]+)/i);
           updates.push({
             row: r,
-            taskName: text,
+            taskName: existingTaskF.getName() || text,
             thUrl: existingTaskF.getUrl(),
             interUrl: noteMatch ? noteMatch[1].trim() : ""
           });
