@@ -1539,13 +1539,17 @@ export default function HomePage() {
             <h4 className="text-base font-semibold text-[#1C1C1E]">กำลังเชื่อมต่อ Google Sheets...</h4>
             <p className="text-xs text-[#78716C] mt-1">กำลังดึงแท็บวันที่และรายชื่อพนักงานจริงจากชีต กรุณารอสักครู่</p>
           </section>
-        ) : isLoading ? (
+        ) : (isLoading || (streamingProgress && Object.keys(groupedTasksByDate).length === 0)) ? (
           <section className="bg-white rounded-[22px] border border-black/[0.06] p-12 text-center shadow-[0_2px_16px_rgba(0,0,0,0.03)]">
             <div className="w-12 h-12 rounded-2xl bg-[#007AFF]/10 text-[#007AFF] flex items-center justify-center mx-auto mb-3 shadow-2xs">
               <RefreshCw className="w-6 h-6 animate-spin" />
             </div>
             <h4 className="text-base font-semibold text-[#1C1C1E]">กำลังค้นหางานจาก Google Sheets...</h4>
-            <p className="text-xs text-[#8E8E93] mt-1">กรุณารอสักครู่ ระบบกำลังดึงข้อมูลล่าสุด</p>
+            <p className="text-xs text-[#8E8E93] mt-1">
+              {streamingProgress
+                ? `กำลังตรวจสอบ ${streamingProgress.activeSheet ? `"${streamingProgress.activeSheet}"` : ""} (ตรวจสอบแล้ว ${streamingProgress.current} จากทั้งหมด ${streamingProgress.total} วัน)`
+                : "กรุณารอสักครู่ ระบบกำลังดึงข้อมูลล่าสุด"}
+            </p>
           </section>
         ) : selectedSheets.length === 0 ? (
           <section className="bg-white rounded-[22px] border border-black/[0.06] p-12 text-center text-[#8E8E93] shadow-[0_2px_16px_rgba(0,0,0,0.03)]">
