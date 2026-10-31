@@ -85,7 +85,7 @@ function extractFolderId(urlOrId) {
 }
 
 /**
- * แปลงชื่อแผ่นงาน (เช่น "7 พย") เป็นชื่อโฟลเดอร์ TH, INTER, และรหัสวันที่
+ * แปลงชื่อแผ่นงาน (เช่น "7 พย", "15 ธค", "5 มค") เป็นชื่อโฟลเดอร์ TH, INTER, และรหัสวันที่ (รองรับครบ 12 เดือน)
  */
 function parseDateFormats(sheetName) {
   const match = sheetName.trim().match(/^(\d+)\s*([^\d\s]+)?/);
@@ -93,26 +93,51 @@ function parseDateFormats(sheetName) {
   const padDay = day < 10 ? "0" + day : "" + day;
   const monthStr = match && match[2] ? match[2].trim() : "พย";
 
+  const MONTH_LIST = [
+    { keys: ["มค", "ม.ค."], th: "ม.ค.", inter: "JAN", num: "01" },
+    { keys: ["กพ", "ก.พ."], th: "ก.พ.", inter: "FEB", num: "02" },
+    { keys: ["มีค", "มี.ค."], th: "มี.ค.", inter: "MAR", num: "03" },
+    { keys: ["เมย", "เม.ย."], th: "เม.ย.", inter: "APR", num: "04" },
+    { keys: ["พค", "พ.ค."], th: "พ.ค.", inter: "MAY", num: "05" },
+    { keys: ["มิย", "มิ.ย."], th: "มิ.ย.", inter: "JUN", num: "06" },
+    { keys: ["กค", "ก.ค."], th: "ก.ค.", inter: "JUL", num: "07" },
+    { keys: ["สค", "ส.ค."], th: "ส.ค.", inter: "AUG", num: "08" },
+    { keys: ["กย", "ก.ย."], th: "ก.ย.", inter: "SEP", num: "09" },
+    { keys: ["ตค", "ต.ค."], th: "ต.ค.", inter: "OCT", num: "10" },
+    { keys: ["พย", "พ.ย."], th: "พ.ย.", inter: "NOV", num: "11" },
+    { keys: ["ธค", "ธ.ค."], th: "ธ.ค.", inter: "DEC", num: "12" }
+  ];
+
   let thMonth = "พ.ย.";
   let interMonth = "NOV";
   let numMonth = "11";
   let thYear = "69";
   let engYear = "2026";
 
-  if (monthStr.includes("ตค") || monthStr.includes("ต.ค.")) {
-    thMonth = "ต.ค.";
-    interMonth = "OCT";
-    numMonth = "10";
-  } else if (monthStr.includes("ธค") || monthStr.includes("ธ.ค.")) {
-    thMonth = "ธ.ค.";
-    interMonth = "DEC";
-    numMonth = "12";
+  try {
+    const now = new Date();
+    engYear = now.getFullYear().toString();
+    thYear = (now.getFullYear() + 543).toString().slice(-2);
+  } catch (e) {}
+
+  for (let i = 0; i < MONTH_LIST.length; i++) {
+    const m = MONTH_LIST[i];
+    if (m.keys.some(k => monthStr.includes(k))) {
+      thMonth = m.th;
+      interMonth = m.inter;
+      numMonth = m.num;
+      break;
+    }
   }
 
   return {
     dayNumber: day,
     padDay: padDay,
     padMonth: numMonth,
+    thMonth: thMonth,
+    interMonth: interMonth,
+    thYear: thYear,
+    engYear: engYear,
     // ตัวอย่าง: "07 พ.ย. 69"
     thFolderName: `${padDay} ${thMonth} ${thYear}`,
     // ตัวอย่าง: "NOV 07,2026"
