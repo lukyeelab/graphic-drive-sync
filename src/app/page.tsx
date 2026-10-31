@@ -1257,7 +1257,14 @@ export default function HomePage() {
       {/* Sticky Bottom Action Bar */}
       <aside className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-200 py-3.5 px-4 shadow-lg z-40">
         <div className="max-w-7xl mx-auto flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleSelectAllPending}
+              className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors inline-flex items-center gap-1.5 cursor-pointer"
+            >
+              <CheckSquare className="w-4 h-4 text-slate-500" />
+              <span>เลือกเฉพาะงานที่ยังไม่เสร็จ</span>
+            </button>
             <span className="text-xs text-slate-600">
               เลือกไว้ <b className="text-indigo-600 font-bold text-sm">{selectedTaskKeys.length}</b> รายการ
             </span>

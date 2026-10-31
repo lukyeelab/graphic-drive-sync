@@ -24,3 +24,11 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* ซ่อน Next.js Dev Indicator / Tooling Overlay ที่มุมล่างจอ */
+[data-nextjs-dev-indicator],
+[data-nextjs-toast],
+nextjs-portal,
+#__next-build-watcher {
+  display: none !important;
+}
