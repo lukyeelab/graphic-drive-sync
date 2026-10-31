@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   FolderPlus,
   RefreshCw,
@@ -76,6 +76,23 @@ export default function HomePage() {
     "แพท", "กิ๊ก", "ภา", "เค้ก", "พี่นาย", "เม่น", "นิว", "มายด์", "เอ้"
   ]);
   const [availableSheets, setAvailableSheets] = useState<string[]>([]);
+  const monthGroups = useMemo(() => {
+    const nov: string[] = [];
+    const oct: string[] = [];
+    const other: string[] = [];
+
+    availableSheets.forEach((s) => {
+      if (s.includes("พย") || s.includes("พ.ย.")) {
+        nov.push(s);
+      } else if (s.includes("ตค") || s.includes("ต.ค.")) {
+        oct.push(s);
+      } else {
+        other.push(s);
+      }
+    });
+
+    return { nov, oct, other };
+  }, [availableSheets]);
   const [isMetadataLoading, setIsMetadataLoading] = useState<boolean>(true);
 
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -480,8 +497,27 @@ export default function HomePage() {
     fetchTasks(assignee, updated, true);
   };
 
-  // Quick Presets: วันนี้, 3 วันล่าสุด, 7 วันล่าสุด, ทุกวันที่ (ALL)
-  const handleSelectPreset = (preset: "today" | "last3" | "last7" | "all") => {
+  // เลือกทั้งกลุ่มเดือน (เช่น เดือน พ.ย. หรือ เดือน ต.ค.)
+  const handleToggleMonthGroup = (sheetsInGroup: string[]) => {
+    if (sheetsInGroup.length === 0) return;
+    const isAllGroupSelected = sheetsInGroup.every((s) => selectedSheets.includes(s));
+    let updated: string[];
+    if (isAllGroupSelected) {
+      updated = selectedSheets.filter((s) => !sheetsInGroup.includes(s) && s !== "ALL");
+      if (updated.length === 0 && availableSheets.length > 0) {
+        updated = [availableSheets[0]];
+      }
+    } else {
+      const withoutAll = selectedSheets.filter((s) => s !== "ALL");
+      updated = Array.from(new Set([...withoutAll, ...sheetsInGroup]));
+    }
+    setSelectedSheets(updated);
+    localStorage.setItem("gds_selectedSheets", JSON.stringify(updated));
+    fetchTasks(assignee, updated, true);
+  };
+
+  // Quick Presets: วันนี้, 3 วันล่าสุด, 7 วันล่าสุด, เดือน พ.ย., เดือน ต.ค., ทุกวันที่ (ALL)
+  const handleSelectPreset = (preset: "today" | "last3" | "last7" | "nov" | "oct" | "all") => {
     let target: string[] = [];
     if (preset === "today") {
       target = availableSheets.slice(0, 1);
@@ -489,6 +525,10 @@ export default function HomePage() {
       target = availableSheets.slice(0, 3);
     } else if (preset === "last7") {
       target = availableSheets.slice(0, 7);
+    } else if (preset === "nov") {
+      target = monthGroups.nov.length > 0 ? monthGroups.nov : availableSheets.filter((s) => s.includes("พย") || s.includes("พ.ย."));
+    } else if (preset === "oct") {
+      target = monthGroups.oct.length > 0 ? monthGroups.oct : availableSheets.filter((s) => s.includes("ตค") || s.includes("ต.ค."));
     } else if (preset === "all") {
       target = ["ALL"];
     }
@@ -496,7 +536,7 @@ export default function HomePage() {
     if (target.length > 0) {
       setSelectedSheets(target);
       localStorage.setItem("gds_selectedSheets", JSON.stringify(target));
-      fetchTasks(assignee, target, preset !== "all");
+      fetchTasks(assignee, target, true);
     }
   };
 
@@ -641,6 +681,43 @@ export default function HomePage() {
     groupedTasksByDate[s].sort((a, b) => (a.row || 0) - (b.row || 0));
   });
 
+const renderDateCheckbox = (s: string) => {
+    const isChecked = selectedSheets.includes(s) && !selectedSheets.includes("ALL");
+    const isLatest = s === availableSheets[0];
+
+    return (
+      <label
+        key={s}
+        className={`flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs font-medium cursor-pointer transition-colors ${
+          isChecked
+            ? "bg-indigo-50 text-indigo-900 font-bold border border-indigo-200/70"
+            : "hover:bg-slate-50 text-slate-700 border border-transparent"
+        }`}
+      >
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={isChecked}
+            onChange={() => handleToggleSheet(s)}
+            className="w-4 h-4 text-indigo-600 rounded-sm focus:ring-indigo-500 cursor-pointer"
+          />
+          <span>{s}</span>
+        </div>
+        {isLatest && (
+          <span
+            className={`text-[9px] px-1.5 py-0.5 rounded-md font-bold uppercase ${
+              isChecked
+                ? "bg-indigo-600 text-white"
+                : "bg-emerald-100 text-emerald-800"
+            }`}
+          >
+            ล่าสุด
+          </span>
+        )}
+      </label>
+    );
+  };
+
   const totalTasks = tasks.length;
   const pendingTasks = tasks.filter((t) => !t.isCompleted).length;
   const completedTasks = totalTasks - pendingTasks;
@@ -708,6 +785,53 @@ export default function HomePage() {
 
         {/* Filter Controls Card */}
         <section className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs relative">
+          {/* Quick Month Switcher */}
+          <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-1.5 border-b border-slate-100">
+            <span className="text-xs font-bold text-slate-500 shrink-0 flex items-center gap-1">
+              <Calendar className="w-3.5 h-3.5 text-indigo-600" />
+              <span>เลือกดูงานตามเดือน:</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => handleSelectPreset("all")}
+              className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                selectedSheets.includes("ALL") || (availableSheets.length > 0 && selectedSheets.length === availableSheets.length)
+                  ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs"
+                  : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+              }`}
+            >
+              🌐 ทุกเดือน ({availableSheets.length > 0 ? availableSheets.length : 52} วัน)
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSelectPreset("nov")}
+              className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                !selectedSheets.includes("ALL") &&
+                monthGroups.nov.length > 0 &&
+                monthGroups.nov.every((s) => selectedSheets.includes(s)) &&
+                selectedSheets.length === monthGroups.nov.length
+                  ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs"
+                  : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+              }`}
+            >
+              🍁 เดือน พ.ย. ({monthGroups.nov.length} วัน)
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSelectPreset("oct")}
+              className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                !selectedSheets.includes("ALL") &&
+                monthGroups.oct.length > 0 &&
+                monthGroups.oct.every((s) => selectedSheets.includes(s)) &&
+                selectedSheets.length === monthGroups.oct.length
+                  ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs"
+                  : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+              }`}
+            >
+              🎃 เดือน ต.ค. ({monthGroups.oct.length} วัน)
+            </button>
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
             {/* 1. Staff Selector */}
             <div>
@@ -797,7 +921,7 @@ export default function HomePage() {
                   </div>
 
                   {/* Quick Preset Buttons */}
-                  <div className="grid grid-cols-2 gap-1.5 mb-2.5">
+                  <div className="grid grid-cols-2 gap-1.5 mb-1.5">
                     <button
                       type="button"
                       onClick={() => handleSelectPreset("today")}
@@ -822,71 +946,122 @@ export default function HomePage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleSelectPreset("last7")}
+                      onClick={() => handleSelectPreset("nov")}
                       className={`px-2 py-1 text-xs font-bold rounded-lg border text-center transition-all cursor-pointer ${
-                        selectedSheets.length === 7 && !selectedSheets.includes("ALL")
+                        !selectedSheets.includes("ALL") &&
+                        monthGroups.nov.length > 0 &&
+                        monthGroups.nov.every((s) => selectedSheets.includes(s)) &&
+                        selectedSheets.length === monthGroups.nov.length
                           ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs"
                           : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
                       }`}
                     >
-                      ⚡ 7 วันล่าสุด
+                      🍁 ทั้งเดือน พ.ย.
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleSelectPreset("all")}
+                      onClick={() => handleSelectPreset("oct")}
                       className={`px-2 py-1 text-xs font-bold rounded-lg border text-center transition-all cursor-pointer ${
-                        selectedSheets.includes("ALL")
+                        !selectedSheets.includes("ALL") &&
+                        monthGroups.oct.length > 0 &&
+                        monthGroups.oct.every((s) => selectedSheets.includes(s)) &&
+                        selectedSheets.length === monthGroups.oct.length
                           ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs"
                           : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
                       }`}
                     >
-                      🌐 ทุกวัน (ALL)
+                      🎃 ทั้งเดือน ต.ค.
                     </button>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => handleSelectPreset("all")}
+                    className={`w-full py-1 text-xs font-bold rounded-lg border text-center transition-all cursor-pointer mb-2.5 ${
+                      selectedSheets.includes("ALL")
+                        ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs"
+                        : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                    }`}
+                  >
+                    🌐 ทุกวันที่ทุกเดือน (ALL - 52 วัน)
+                  </button>
 
-                  {/* Scrollable Date Checkbox List */}
-                  <div className="max-h-56 overflow-y-auto space-y-1 pr-1 border-t border-slate-100 pt-2">
+                  {/* Scrollable Date Checkbox List Grouped by Month */}
+                  <div className="max-h-60 overflow-y-auto space-y-3 pr-1 border-t border-slate-100 pt-2">
                     {availableSheets.length === 0 ? (
                       <div className="py-4 text-center text-xs text-slate-400 italic">
                         ⏳ กำลังดึงวันที่...
                       </div>
                     ) : (
-                      availableSheets.map((s, idx) => {
-                        const isChecked = selectedSheets.includes(s) && !selectedSheets.includes("ALL");
-                        const isLatest = idx === 0;
-
-                        return (
-                          <label
-                            key={s}
-                            className={`flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs font-medium cursor-pointer transition-colors ${
-                              isChecked
-                                ? "bg-indigo-50 text-indigo-900 font-bold border border-indigo-200/70"
-                                : "hover:bg-slate-50 text-slate-700 border border-transparent"
-                            }`}
-                          >
-                            <div className="flex items-center gap-2">
-                              <input
-                                type="checkbox"
-                                checked={isChecked}
-                                onChange={() => handleToggleSheet(s)}
-                                className="w-4 h-4 text-indigo-600 rounded-sm focus:ring-indigo-500 cursor-pointer"
-                              />
-                              <span>{s}</span>
-                            </div>
-                            {isLatest && (
-                              <span
-                                className={`text-[9px] px-1.5 py-0.5 rounded-md font-bold uppercase ${
-                                  isChecked
-                                    ? "bg-indigo-600 text-white"
-                                    : "bg-emerald-100 text-emerald-800"
-                                }`}
-                              >
-                                ล่าสุด
+                      <>
+                        {/* เดือน พ.ย. */}
+                        {monthGroups.nov.length > 0 && (
+                          <div>
+                            <div className="flex items-center justify-between px-2 py-1 bg-slate-100 rounded-lg mb-1 sticky top-0 z-10 shadow-2xs">
+                              <span className="text-[11px] font-bold text-slate-700">
+                                🍁 เดือน พ.ย. ({monthGroups.nov.length} วัน)
                               </span>
-                            )}
-                          </label>
-                        );
-                      })
+                              <button
+                                type="button"
+                                onClick={() => handleToggleMonthGroup(monthGroups.nov)}
+                                className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                              >
+                                {monthGroups.nov.every((s) => selectedSheets.includes(s))
+                                  ? "ยกเลิกทั้งเดือน"
+                                  : "เลือกทั้งเดือน"}
+                              </button>
+                            </div>
+                            <div className="space-y-0.5">
+                              {monthGroups.nov.map((s) => renderDateCheckbox(s))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* เดือน ต.ค. */}
+                        {monthGroups.oct.length > 0 && (
+                          <div>
+                            <div className="flex items-center justify-between px-2 py-1 bg-slate-100 rounded-lg mb-1 sticky top-0 z-10 shadow-2xs">
+                              <span className="text-[11px] font-bold text-slate-700">
+                                🎃 เดือน ต.ค. ({monthGroups.oct.length} วัน)
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleToggleMonthGroup(monthGroups.oct)}
+                                className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                              >
+                                {monthGroups.oct.every((s) => selectedSheets.includes(s))
+                                  ? "ยกเลิกทั้งเดือน"
+                                  : "เลือกทั้งเดือน"}
+                              </button>
+                            </div>
+                            <div className="space-y-0.5">
+                              {monthGroups.oct.map((s) => renderDateCheckbox(s))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* แผ่นงานอื่นๆ */}
+                        {monthGroups.other.length > 0 && (
+                          <div>
+                            <div className="flex items-center justify-between px-2 py-1 bg-slate-100 rounded-lg mb-1 sticky top-0 z-10 shadow-2xs">
+                              <span className="text-[11px] font-bold text-slate-700">
+                                📁 แผ่นงานอื่นๆ ({monthGroups.other.length} แผ่น)
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleToggleMonthGroup(monthGroups.other)}
+                                className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                              >
+                                {monthGroups.other.every((s) => selectedSheets.includes(s))
+                                  ? "ยกเลิก"
+                                  : "เลือกทั้งหมด"}
+                              </button>
+                            </div>
+                            <div className="space-y-0.5">
+                              {monthGroups.other.map((s) => renderDateCheckbox(s))}
+                            </div>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
 
