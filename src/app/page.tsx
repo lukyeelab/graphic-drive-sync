@@ -1043,7 +1043,7 @@ export default function HomePage() {
     <div className="min-h-screen bg-[#F2F2F7] flex flex-col font-sans pb-32">
       {/* iOS 18 Frosted Glass Header */}
       <header className="bg-[#F2F2F7]/80 backdrop-blur-2xl border-b border-black/[0.06] sticky top-0 z-30 transition-all">
-        <div className="max-w-[1720px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-[12px] bg-gradient-to-b from-[#1C1C1E] to-[#000000] flex items-center justify-center text-white shadow-xs ring-1 ring-black/5">
               <FolderPlus className="w-5 h-5 text-white" />
@@ -1098,7 +1098,7 @@ export default function HomePage() {
       </header>
 
       {/* Main Container */}
-      <main className="max-w-[1720px] mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full flex flex-col gap-6">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full flex flex-col gap-6">
         {/* Error Alert Box */}
         {errorMessage && (
           <div className="bg-[#FF3B30]/10 border border-[#FF3B30]/20 rounded-2xl p-4 flex items-start gap-3">
@@ -1508,12 +1508,12 @@ export default function HomePage() {
             <p className="text-xs text-[#78716C] mt-1">กำลังดึงแท็บวันที่และรายชื่อพนักงานจริงจากชีต กรุณารอสักครู่</p>
           </section>
         ) : isLoading ? (
-          <section className="bg-white rounded-2xl border border-[#E4DFD5] p-12 text-center shadow-[0_4px_24px_-4px_rgba(30,26,20,0.03)]">
-            <div className="w-12 h-12 rounded-2xl bg-[#F4EFE6] text-[#A87B43] flex items-center justify-center mx-auto mb-3 shadow-2xs">
+          <section className="bg-white rounded-[22px] border border-black/[0.06] p-12 text-center shadow-[0_2px_16px_rgba(0,0,0,0.03)]">
+            <div className="w-12 h-12 rounded-2xl bg-[#007AFF]/10 text-[#007AFF] flex items-center justify-center mx-auto mb-3 shadow-2xs">
               <RefreshCw className="w-6 h-6 animate-spin" />
             </div>
-            <h4 className="text-base font-bold text-[#1C1917]">กำลังค้นหางานจาก Google Sheets...</h4>
-            <p className="text-xs text-[#78716C] mt-1">กรุณารอสักครู่ ระบบกำลังดึงข้อมูลล่าสุด</p>
+            <h4 className="text-base font-semibold text-[#1C1C1E]">กำลังค้นหางานจาก Google Sheets...</h4>
+            <p className="text-xs text-[#8E8E93] mt-1">กรุณารอสักครู่ ระบบกำลังดึงข้อมูลล่าสุด</p>
           </section>
         ) : selectedSheets.length === 0 ? (
           <section className="bg-white rounded-[22px] border border-black/[0.06] p-12 text-center text-[#8E8E93] shadow-[0_2px_16px_rgba(0,0,0,0.03)]">
@@ -1646,7 +1646,7 @@ export default function HomePage() {
             return (
               <section
                 key={dateSheet}
-                className="bg-white rounded-[22px] border border-black/[0.06] shadow-[0_2px_16px_rgba(0,0,0,0.03)] overflow-hidden mb-6"
+                className="bg-white rounded-[22px] border border-black/[0.08] shadow-[0_2px_16px_rgba(0,0,0,0.03)] overflow-hidden mb-6"
               >
                 {/* Date Group Header */}
                 <div className="bg-[#F2F2F7]/80 px-5 py-3.5 border-b border-black/[0.06] flex items-center justify-between flex-wrap gap-2">
@@ -1673,27 +1673,31 @@ export default function HomePage() {
                 </div>
 
                 {/* Table for this date */}
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
+                <div className="overflow-x-auto rounded-b-[22px]">
+                  <table className="w-full text-left border-separate border-spacing-0">
                     <thead>
-                      <tr className="bg-[#F2F2F7] border-b border-[#E5E5EA] text-[11px] font-semibold text-[#8E8E93] uppercase tracking-wider">
-                        <th className="py-3.5 px-4 w-12 text-center text-[#8E8E93]">เลือก</th>
-                        <th className="py-3.5 px-3 w-16 text-center text-[#8E8E93]">แถว</th>
-                        <th className="py-3.5 px-4 w-36 text-[#8E8E93]">หมวดหมู่</th>
-                        <th className="py-3.5 px-4 min-w-[190px] w-52 text-[#8E8E93]">ใบบรีฟ</th>
-                        <th className="py-3.5 px-3 w-16 text-center text-[#8E8E93]">No.</th>
-                        <th className="py-3.5 px-4 text-[#8E8E93]">ชื่องาน/ชื่อโฟลเดอร์ (TH)</th>
-                        <th className="py-3.5 px-3 text-center min-w-[140px] w-40 whitespace-nowrap text-[#8E8E93]">วันที่จ่ายงาน</th>
-                        <th className="py-3.5 px-3 text-center min-w-[110px] w-28 whitespace-nowrap text-[#8E8E93]">สถานะ</th>
-                        <th className="py-3.5 px-3 text-center min-w-[210px] w-56 text-[#8E8E93]">ลิงก์โฟลเดอร์ (TH & INTER)</th>
+                      <tr className="bg-[#F2F2F7] text-[11px] font-semibold text-[#8E8E93] uppercase tracking-wider">
+                        <th className="py-3.5 px-3 w-12 text-center text-[#8E8E93] border-b border-[#E5E5EA]">เลือก</th>
+                        <th className="py-3.5 px-2 w-14 text-center text-[#8E8E93] border-b border-[#E5E5EA]">แถว</th>
+                        <th className="py-3.5 px-3 w-32 whitespace-nowrap text-[#8E8E93] border-b border-[#E5E5EA]">หมวดหมู่</th>
+                        <th className="py-3.5 px-3 min-w-[160px] w-48 whitespace-nowrap text-[#8E8E93] border-b border-[#E5E5EA]">ใบบรีฟ</th>
+                        <th className="py-3.5 px-2 w-12 text-center text-[#8E8E93] border-b border-[#E5E5EA]">No.</th>
+                        <th className="py-3.5 px-4 min-w-[240px] whitespace-nowrap text-[#8E8E93] border-b border-[#E5E5EA]">ชื่องาน/ชื่อโฟลเดอร์ (TH)</th>
+                        <th className="py-3.5 px-3 w-36 whitespace-nowrap text-center text-[#8E8E93] border-b border-[#E5E5EA]">วันที่จ่ายงาน</th>
+                        <th className="py-3.5 px-3 w-28 whitespace-nowrap text-center text-[#8E8E93] border-b border-[#E5E5EA]">สถานะ</th>
+                        <th className="py-3.5 px-3 w-44 whitespace-nowrap text-center text-[#8E8E93] border-b border-[#E5E5EA]">ลิงก์โฟลเดอร์ (TH & INTER)</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-[#E5E5EA]/70 text-sm bg-white">
-                      {dateTasks.map((task) => {
+                    <tbody className="text-sm bg-white">
+                      {dateTasks.map((task, idx) => {
                         const key = getTaskKey(task.sheetName, task.row);
                         const isSelected = selectedTaskKeys.includes(key);
                         const isSyncingThis = syncingTaskKeys.includes(key);
                         const isJustCompleted = justCompletedKeys.has(key);
+                        const isLastRow = idx === dateTasks.length - 1;
+                        const cellBorder = isLastRow ? "" : "border-b border-[#E5E5EA]/70";
+                        const cornerBl = isLastRow ? "rounded-bl-[22px]" : "";
+                        const cornerBr = isLastRow ? "rounded-br-[22px]" : "";
                         const catStyle = CATEGORY_COLORS[task.category] || {
                           bg: "bg-[#767680]/10",
                           text: "text-[#636366]",
@@ -1707,15 +1711,15 @@ export default function HomePage() {
                             onClick={() => toggleSelectTask(key)}
                             className={`transition-all duration-150 cursor-pointer ${
                               isSyncingThis
-                                ? "bg-[#FF9500]/10 animate-pulse ring-1 ring-inset ring-[#FF9500]/30"
+                                ? "bg-[#FF9500]/10 animate-pulse"
                                 : isJustCompleted
                                 ? "bg-[#34C759]/[0.08] hover:bg-[#34C759]/[0.12]"
                                 : isSelected
-                                ? "bg-[#007AFF]/[0.08] hover:bg-[#007AFF]/[0.12] ring-1 ring-inset ring-[#007AFF]/30"
+                                ? "bg-[#007AFF]/[0.08] hover:bg-[#007AFF]/[0.12]"
                                 : "hover:bg-[#F2F2F7]/50"
                             }`}
                           >
-                            <td className="py-3.5 px-4 text-center" onClick={(e) => e.stopPropagation()}>
+                            <td className={`py-3.5 px-3 text-center ${cellBorder} ${cornerBl}`} onClick={(e) => e.stopPropagation()}>
                               {isSyncingThis ? (
                                 <Loader2 className="w-5 h-5 text-[#007AFF] animate-spin mx-auto" />
                               ) : (
@@ -1731,10 +1735,10 @@ export default function HomePage() {
                                 </button>
                               )}
                             </td>
-                            <td className="py-3.5 px-3 text-center text-xs font-mono font-semibold text-[#8E8E93]">
+                            <td className={`py-3.5 px-2 text-center text-xs font-mono font-semibold text-[#8E8E93] ${cellBorder}`}>
                               #{task.row}
                             </td>
-                            <td className="py-3.5 px-4">
+                            <td className={`py-3.5 px-3 ${cellBorder}`}>
                               <span
                                 className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${catStyle.bg} ${catStyle.text} ${catStyle.border} shadow-2xs`}
                               >
@@ -1742,7 +1746,7 @@ export default function HomePage() {
                                 <span>{task.category}</span>
                               </span>
                             </td>
-                            <td className="py-3.5 px-4" onClick={(e) => e.stopPropagation()}>
+                            <td className={`py-3.5 px-3 ${cellBorder}`} onClick={(e) => e.stopPropagation()}>
                               {(() => {
                                 const rawLink = (task.briefLink || "").trim();
                                 const titleText = (task.briefTitle || "").trim() || "ใบบรีฟ";
@@ -1772,10 +1776,10 @@ export default function HomePage() {
                                 return <span className="text-xs text-[#8E8E93]">-</span>;
                               })()}
                             </td>
-                            <td className="py-3.5 px-3 text-center font-mono font-bold text-[#1C1C1E]">
+                            <td className={`py-3.5 px-2 text-center font-mono font-bold text-[#1C1C1E] ${cellBorder}`}>
                               {task.no || "-"}
                             </td>
-                            <td className="py-3.5 px-4" onClick={(e) => e.stopPropagation()}>
+                            <td className={`py-3.5 px-4 ${cellBorder}`} onClick={(e) => e.stopPropagation()}>
                               {(() => {
                                 const currentInput = (taskNamesMap[key] ?? "").trim();
                                 const originalName = (task.taskName || "").trim();
@@ -1809,7 +1813,7 @@ export default function HomePage() {
                                 );
                               })()}
                             </td>
-                            <td className="py-3.5 px-3 text-center whitespace-nowrap">
+                            <td className={`py-3.5 px-3 text-center whitespace-nowrap ${cellBorder}`}>
                               {(() => {
                                 const rawDate = task.assignDate ? String(task.assignDate).trim() : "";
                                 if (!rawDate || rawDate === "-") {
@@ -1839,7 +1843,7 @@ export default function HomePage() {
                                 );
                               })()}
                             </td>
-                            <td className="py-3.5 px-3 text-center whitespace-nowrap">
+                            <td className={`py-3.5 px-3 text-center whitespace-nowrap ${cellBorder}`}>
                               {(() => {
                                 if (isSyncingThis) {
                                   return (
@@ -1881,7 +1885,7 @@ export default function HomePage() {
                                 );
                               })()}
                             </td>
-                            <td className="py-3.5 px-3 text-center" onClick={(e) => e.stopPropagation()}>
+                            <td className={`py-3.5 px-3 text-center ${cellBorder} ${cornerBr}`} onClick={(e) => e.stopPropagation()}>
                               {(() => {
                                 const linkInfo = folderLinksMap[key];
                                 const thUrl = (linkInfo?.thUrl || task.uploadUrl || "").trim();
@@ -1954,7 +1958,7 @@ export default function HomePage() {
       </main>
 
       {/* iOS 18 Dynamic Island Floating Dock */}
-      <aside className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 w-[95%] max-w-3xl bg-[#000000]/90 backdrop-blur-2xl border border-white/15 py-2.5 px-4 rounded-full shadow-[0_20px_50px_rgba(0,0,0,0.4)] text-white transition-all ring-1 ring-white/10">
+      <aside className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 w-[95%] max-w-2xl bg-[#000000]/90 backdrop-blur-2xl border border-white/15 py-2.5 px-4 rounded-full shadow-[0_20px_50px_rgba(0,0,0,0.4)] text-white transition-all ring-1 ring-white/10">
         {isSyncing ? (
           // สถานะกำลังส่งคำขอสร้างโฟลเดอร์ (มีปุ่มยกเลิกการส่งคำขอ)
           <div className="flex items-center justify-between flex-wrap gap-2 w-full">
