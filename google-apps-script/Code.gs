@@ -924,6 +924,99 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
           scriptCache.putAll(cacheToPut, 300); // แคชไว้นาน 5 นาที
         }
       } catch (e) {}
+    } else {
+      // Fallback: หาก Sheets API v4 ไม่พร้อมใช้งานหรือติดสิทธิ์ OAuth ให้ดึงผ่าน SpreadsheetApp ตรงๆ ทันที (ชัวร์ 100%)
+      Logger.log("Falling back to SpreadsheetApp for: " + sheetsToFetchFromApi.join(", "));
+      for (let sIdx = 0; sIdx < sheetsToFetchFromApi.length; sIdx++) {
+        const sName = sheetsToFetchFromApi[sIdx];
+        const sheet = ss.getSheetByName(sName);
+        if (!sheet) continue;
+        const maxFallbackRow = sheetsToFetchFromApi.length === 1 ? 220 : 120;
+        const lastRow = Math.min(sheet.getLastRow(), maxFallbackRow);
+        if (lastRow < CONFIG.DATA_START_ROW) continue;
+
+        const range = sheet.getRange(1, 1, lastRow, 12);
+        const values = range.getValues();
+        const formulas = range.getFormulas();
+        const notes = range.getNotes();
+        const colDBriefRich = sheet.getRange(1, CONFIG.COL_BRIEF_LINK, lastRow, 1).getRichTextValues();
+        const colFUploadRich = sheet.getRange(1, CONFIG.COL_UPLOAD_LINK, lastRow, 1).getRichTextValues();
+        const parsedSheetTasks = [];
+
+        let currentCategory = "";
+        let currentBriefLink = "";
+        let currentBriefTitle = "";
+
+        for (let r = CONFIG.DATA_START_ROW; r <= lastRow; r++) {
+          const rowIdx = r - 1;
+          const categoryCell = values[rowIdx][CONFIG.COL_CATEGORY_NAME - 1];
+          if (categoryCell && categoryCell.toString().trim() !== "") {
+            currentCategory = categoryCell.toString().trim();
+            currentBriefLink = "";
+            currentBriefTitle = "";
+          }
+
+          const briefVal = values[rowIdx][CONFIG.COL_BRIEF_LINK - 1];
+          const briefRich = colDBriefRich[rowIdx][0];
+          const briefFormula = formulas[rowIdx][CONFIG.COL_BRIEF_LINK - 1];
+          const extractedBrief = extractCellLinkAndTitle(briefVal, briefRich, briefFormula);
+
+          if (extractedBrief.link) currentBriefLink = extractedBrief.link;
+          if (extractedBrief.title) currentBriefTitle = extractedBrief.title;
+
+          const rowAssignee = (values[rowIdx][CONFIG.COL_ASSIGNEE - 1] || "").toString().trim();
+          const noVal = values[rowIdx][CONFIG.COL_NO - 1] || "";
+          const uploadCellText = (values[rowIdx][CONFIG.COL_UPLOAD_LINK - 1] || "").toString().trim();
+          const status = (values[rowIdx][CONFIG.COL_STATUS - 1] || "").toString().trim();
+
+          if (!rowAssignee && !noVal && !uploadCellText) continue;
+
+          const uploadRich = colFUploadRich[rowIdx][0];
+          const uploadFormula = formulas[rowIdx][CONFIG.COL_UPLOAD_LINK - 1];
+          const extractedUpload = extractCellLinkAndTitle(uploadCellText, uploadRich, uploadFormula);
+          const uploadUrl = extractedUpload.link;
+
+          const cellNote = (notes[rowIdx] && notes[rowIdx][CONFIG.COL_UPLOAD_LINK - 1]) || "";
+          let interFolderUrl = "";
+          const noteMatch = cellNote.match(/INTER:\s*(https:\/\/[^\s]+)/i);
+          if (noteMatch && noteMatch[1]) {
+            interFolderUrl = noteMatch[1].trim();
+          }
+
+          const isCompleted = status.includes("เสร็จสิ้น") || (uploadUrl !== "" && uploadCellText !== "");
+          const taskBriefLink = fastFormatPresentationUrl(currentBriefLink);
+          const team = (values[rowIdx][CONFIG.COL_TEAM - 1] || "").toString().trim();
+          const assignDate = values[rowIdx][CONFIG.COL_ASSIGN_DATE - 1] || "";
+
+          parsedSheetTasks.push({
+            sheetName: sName,
+            row: r,
+            category: currentCategory || "ทั่วไป",
+            briefLink: taskBriefLink,
+            briefTitle: currentBriefTitle,
+            no: noVal || 1,
+            taskName: uploadCellText,
+            uploadUrl: uploadUrl,
+            interFolderUrl: interFolderUrl,
+            hasUploadLink: !!uploadUrl,
+            team: team,
+            assignee: rowAssignee,
+            assignDate: assignDate instanceof Date ? Utilities.formatDate(assignDate, "GMT+7", "dd/MM/yyyy") : assignDate,
+            status: status || "กำลังทำ",
+            isCompleted: isCompleted,
+          });
+        }
+
+        sheetsTasksMap[sName] = parsedSheetTasks;
+        const cKey = cacheKeyMap[sName] || ("FAST_TASKS_V2_" + Utilities.base64EncodeWebSafe(sName).slice(0, 50));
+        cacheToPut[cKey] = JSON.stringify(parsedSheetTasks);
+      }
+
+      try {
+        if (Object.keys(cacheToPut).length > 0) {
+          scriptCache.putAll(cacheToPut, 300);
+        }
+      } catch (e) {}
     }
   }
 

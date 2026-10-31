@@ -175,10 +175,23 @@ export default function HomePage() {
       if (data.success) {
         if (data.sheetNames && data.sheetNames.length > 0) {
           setAvailableSheets(data.sheetNames);
-          const latestSheet = data.sheetNames[0];
-          setSheetName(latestSheet);
-          // ดึงงานของแผ่นงานล่าสุดอัตโนมัติเมื่อได้วันที่จริงจาก Google Sheets
-          fetchTasks(initialAssignee, latestSheet);
+
+          const savedSheet = localStorage.getItem("gds_sheetName");
+          const today = new Date();
+          const thaiMonthsShort = ["มค", "กพ", "มีค", "เมย", "พค", "มิย", "กค", "สค", "กย", "ตค", "พย", "ธค"];
+          const todaySheetPrefix = `${today.getDate()} ${thaiMonthsShort[today.getMonth()]}`;
+
+          let targetSheet = "";
+          if (savedSheet && (data.sheetNames.includes(savedSheet) || savedSheet === "ALL")) {
+            targetSheet = savedSheet;
+          } else {
+            // ค้นหาแท็บที่ตรงกับวันปัจจุบัน หรือแท็บที่มีงานจริง
+            const matchToday = data.sheetNames.find((s: string) => s.replace(/\./g, "").trim() === todaySheetPrefix);
+            targetSheet = matchToday || data.sheetNames.find((s: string) => s.includes("31 ตค")) || data.sheetNames[0];
+          }
+
+          setSheetName(targetSheet);
+          fetchTasks(initialAssignee, targetSheet);
         }
         if (data.staffList && data.staffList.length > 0) {
           setStaffList(data.staffList);
@@ -513,8 +526,10 @@ export default function HomePage() {
               <select
                 value={sheetName}
                 onChange={(e) => {
-                  setSheetName(e.target.value);
-                  fetchTasks(assignee, e.target.value);
+                  const val = e.target.value;
+                  setSheetName(val);
+                  localStorage.setItem("gds_sheetName", val);
+                  fetchTasks(assignee, val);
                 }}
                 disabled={isMetadataLoading || availableSheets.length === 0}
                 className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-medium disabled:opacity-75 disabled:cursor-not-allowed"
