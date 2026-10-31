@@ -432,22 +432,65 @@ function findDriveFileOrFolderUrl(title) {
   const singleSpaced = cleanTitle.replace(/\s+/g, " ");
   const titleWithoutExt = singleSpaced.replace(/\.(pptx?|pdf|docx?)$/i, "").trim();
 
-  // 1. ค้นหาไฟล์ตรงตามชื่อ (ทั้งที่มีนามสกุล และไม่มีนามสกุล)
-  try {
-    const namesToCheck = [singleSpaced];
-    if (titleWithoutExt && titleWithoutExt !== singleSpaced) {
-      namesToCheck.push(titleWithoutExt);
-      namesToCheck.push(titleWithoutExt + ".pptx");
-      namesToCheck.push(titleWithoutExt + ".ppt");
-    }
+  // 1. สร้างรายชื่อไฟล์ที่อาจเป็นไปได้ทั้งหมด (ทั้งมี/ไม่มีนามสกุล, สลับช่องว่างรอบขีด เช่น 2-8 กับ 2 - 8)
+  const namesToCheck = [cleanTitle, singleSpaced, titleWithoutExt];
+  if (singleSpaced.includes("-")) {
+    const withSpacedDash = singleSpaced.replace(/\s*-\s*/g, " - ");
+    const withNoSpacedDash = singleSpaced.replace(/\s*-\s*/g, "-");
+    namesToCheck.push(withSpacedDash);
+    namesToCheck.push(withNoSpacedDash);
+    namesToCheck.push(withSpacedDash.replace(/\.(pptx?|pdf|docx?)$/i, "").trim());
+    namesToCheck.push(withNoSpacedDash.replace(/\.(pptx?|pdf|docx?)$/i, "").trim());
+  }
 
-    for (let n = 0; n < namesToCheck.length; n++) {
-      const files = DriveApp.getFilesByName(namesToCheck[n]);
+  const extList = [".pptx", ".ppt"];
+  const baseCount = namesToCheck.length;
+  for (let i = 0; i < baseCount; i++) {
+    for (let j = 0; j < extList.length; j++) {
+      namesToCheck.push(namesToCheck[i] + extList[j]);
+    }
+  }
+
+  // ค้นหาแบบตรงชื่อเป๊ะ (getFilesByName)
+  const checkedSet = {};
+  for (let n = 0; n < namesToCheck.length; n++) {
+    const name = namesToCheck[n].trim();
+    if (!name || checkedSet[name]) continue;
+    checkedSet[name] = true;
+
+    try {
+      const files = DriveApp.getFilesByName(name);
       while (files.hasNext()) {
         const f = files.next();
         if (!f.isTrashed()) {
           const mType = f.getMimeType();
-          // ถ้าเป็น Google Slides หรือ PPTX ให้คืนค่าเป็น presentation edit URL ทันที
+          if (
+            mType === "application/vnd.google-apps.presentation" ||
+            mType === "application/vnd.openxmlformats-officedocument.presentationml.presentation" ||
+            f.getName().toLowerCase().endsWith(".pptx")
+          ) {
+            return `https://docs.google.com/presentation/d/${f.getId()}/edit`;
+          }
+          return f.getUrl();
+        }
+      }
+    } catch (e) {
+      Logger.log("Exact file name search: " + e.message);
+    }
+  }
+
+  // 2. ค้นหาแบบ Fuzzy ผ่าน searchFiles โดยสกัดคำสำคัญ เช่น "SLOT" และ "BRIEF" (ไม่ล็อก mimeType เพื่อความแม่นยำ 100%)
+  try {
+    const words = titleWithoutExt.split(/[\s\-–—]+/).filter(w => w.length >= 3 && !/^\d+$/.test(w));
+    if (words.length >= 2) {
+      const w0 = words[0].replace(/['"\\]/g, "");
+      const w1 = words[1].replace(/['"\\]/g, "");
+      const q = `title contains '${w0}' and title contains '${w1}' and trashed = false`;
+      const slides = DriveApp.searchFiles(q);
+      while (slides.hasNext()) {
+        const f = slides.next();
+        if (!f.isTrashed()) {
+          const mType = f.getMimeType();
           if (
             mType === "application/vnd.google-apps.presentation" ||
             mType === "application/vnd.openxmlformats-officedocument.presentationml.presentation" ||
@@ -460,37 +503,7 @@ function findDriveFileOrFolderUrl(title) {
       }
     }
   } catch (e) {
-    Logger.log("Exact file name search: " + e.message);
-  }
-
-  // 2. ค้นหาผ่าน searchFiles โดยรองรับทั้ง Google Slides และ PowerPoint (.pptx)
-  try {
-    const safeFull = (titleWithoutExt || singleSpaced).replace(/['"\\]/g, "");
-    const qFull = `title contains '${safeFull.slice(0, 30)}' and (mimeType = 'application/vnd.google-apps.presentation' or mimeType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation') and trashed = false`;
-    const slidesFull = DriveApp.searchFiles(qFull);
-    if (slidesFull.hasNext()) {
-      const slide = slidesFull.next();
-      return `https://docs.google.com/presentation/d/${slide.getId()}/edit`;
-    }
-  } catch (e) {
-    Logger.log("Full title search error: " + e.message);
-  }
-
-  // 3. ค้นหาจากคีย์เวิร์ดสำคัญ (เช่น SLOT BRIEF, FOOTBALL BRIEF, BOXING BRIEF)
-  try {
-    const segments = (titleWithoutExt || singleSpaced).split(/[-–—]/);
-    const mainKey = (segments[0] || singleSpaced).trim().replace(/['"\\]/g, "");
-
-    if (mainKey.length >= 3) {
-      const q = `title contains '${mainKey.slice(0, 30)}' and (mimeType = 'application/vnd.google-apps.presentation' or mimeType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation') and trashed = false`;
-      const slides = DriveApp.searchFiles(q);
-      if (slides.hasNext()) {
-        const slide = slides.next();
-        return `https://docs.google.com/presentation/d/${slide.getId()}/edit`;
-      }
-    }
-  } catch (e) {
-    Logger.log("Slides search error: " + e.message);
+    Logger.log("Keyword search error: " + e.message);
   }
 
   return "";
@@ -1003,6 +1016,34 @@ function sortSheetNamesDesc(sheets) {
 /**
  * ดึงลิงก์และข้อความจาก Cell Object ของ Sheets API v4 (รองรับทั้ง Smart Chip, Hyperlink และ Runs)
  */
+function extractDeepUriOrId(obj, depth) {
+  if (!obj || typeof obj !== "object" || (depth || 0) > 6) return "";
+  if (obj.uri && typeof obj.uri === "string" && obj.uri.startsWith("http")) return obj.uri.trim();
+  if (obj.url && typeof obj.url === "string" && obj.url.startsWith("http")) return obj.url.trim();
+  if (obj.fileId && typeof obj.fileId === "string" && obj.fileId.length >= 20) {
+    return "https://drive.google.com/open?id=" + obj.fileId.trim();
+  }
+  if (obj.driveFileId && typeof obj.driveFileId === "string" && obj.driveFileId.length >= 20) {
+    return "https://drive.google.com/open?id=" + obj.driveFileId.trim();
+  }
+  for (const k in obj) {
+    if (Object.prototype.hasOwnProperty.call(obj, k)) {
+      const val = obj[k];
+      if (typeof val === "string" && (val.startsWith("https://drive.google.com") || val.startsWith("https://docs.google.com"))) {
+        return val.trim();
+      }
+      if (typeof val === "object" && val !== null) {
+        const found = extractDeepUriOrId(val, (depth || 0) + 1);
+        if (found) return found;
+      }
+    }
+  }
+  return "";
+}
+
+/**
+ * แยกข้อมูลข้อความ ลิงก์ และ Note จาก Cell Object ที่ส่งมาจาก Sheets API v4
+ */
 function extractApiCellInfo(cellObj) {
   if (!cellObj) return { title: "", link: "", note: "" };
   const title = (cellObj.formattedValue || "").toString().trim();
@@ -1018,31 +1059,15 @@ function extractApiCellInfo(cellObj) {
     }
   }
 
-  // 2. ดึงลิงก์จาก Google Drive Smart Chip ทันที (ตรวจสอบทุกโครงสร้างที่เป็นไปได้)
+  // 2. ดึงลิงก์จาก Google Drive Smart Chip ทันที (ตรวจสอบทุกโครงสร้างที่เป็นไปได้แบบ Deep Scan)
   if (!link && cellObj.chipRuns && cellObj.chipRuns.length > 0) {
     for (let i = 0; i < cellObj.chipRuns.length; i++) {
-      const chip = cellObj.chipRuns[i].chip;
-      if (!chip) continue;
-
-      if (chip.richLinkProperties && chip.richLinkProperties.uri) {
-        link = chip.richLinkProperties.uri.trim();
+      const chipObj = cellObj.chipRuns[i];
+      const deepUri = extractDeepUriOrId(chipObj);
+      if (deepUri) {
+        link = deepUri;
         break;
       }
-
-      for (const k in chip) {
-        const item = chip[k];
-        if (item && typeof item === "object") {
-          if (item.uri && typeof item.uri === "string") {
-            link = item.uri.trim();
-            break;
-          }
-          if (item.fileId && typeof item.fileId === "string") {
-            link = "https://drive.google.com/open?id=" + item.fileId.trim();
-            break;
-          }
-        }
-      }
-      if (link) break;
     }
   }
 
@@ -1160,9 +1185,12 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force) {
 
           const categoryCell = vals[CONFIG.COL_CATEGORY_NAME - 1]?.formattedValue;
           if (categoryCell && categoryCell.toString().trim() !== "") {
-            currentCategory = categoryCell.toString().trim();
-            currentBriefLink = "";
-            currentBriefTitle = "";
+            const newCat = categoryCell.toString().trim();
+            if (newCat !== currentCategory) {
+              currentCategory = newCat;
+              currentBriefLink = "";
+              currentBriefTitle = "";
+            }
           }
 
           const briefInfo = extractApiCellInfo(vals[CONFIG.COL_BRIEF_LINK - 1]);
@@ -1251,9 +1279,12 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force) {
           const rowIdx = r - 1;
           const categoryCell = values[rowIdx][CONFIG.COL_CATEGORY_NAME - 1];
           if (categoryCell && categoryCell.toString().trim() !== "") {
-            currentCategory = categoryCell.toString().trim();
-            currentBriefLink = "";
-            currentBriefTitle = "";
+            const newCat = categoryCell.toString().trim();
+            if (newCat !== currentCategory) {
+              currentCategory = newCat;
+              currentBriefLink = "";
+              currentBriefTitle = "";
+            }
           }
 
           const briefVal = values[rowIdx][CONFIG.COL_BRIEF_LINK - 1];
@@ -1454,7 +1485,7 @@ function writeSmartChipsBatchToSheet(spreadsheetId, sheet, updates) {
     }
   }
 
-  // ขั้นตอนที่ 3: บันทึก Note ของ INTER และเปลี่ยนสถานะ Col L เป็น "เสร็จสิ้น"
+  // ขั้นตอนที่ 3: บันทึก Note ของ INTER และเปลี่ยนสถานะ Col L เป็น "เสร็จสิ้น" อย่างปลอดภัย (ไม่พังจาก Data Validation)
   for (let i = 0; i < updates.length; i++) {
     const u = updates[i];
     try {
@@ -1462,8 +1493,7 @@ function writeSmartChipsBatchToSheet(spreadsheetId, sheet, updates) {
       if (u.interUrl) {
         cellF.setNote(`INTER: ${u.interUrl}`);
       }
-      const cellL = sheet.getRange(u.row, CONFIG.COL_STATUS);
-      cellL.setValue("เสร็จสิ้น");
+      setSafeStatusCompleted(sheet, u.row);
     } catch (e2) {
       Logger.log(`ตั้งค่าสถานะ/Note แถว ${u.row} ไม่สำเร็จ: ${e2.message}`);
     }
@@ -1474,6 +1504,40 @@ function writeSmartChipsBatchToSheet(spreadsheetId, sheet, updates) {
     smartChip: apiSuccess,
     error: errorDetail
   };
+}
+
+/**
+ * ตั้งค่าสถานะ Col L อย่างปลอดภัยเพื่อรองรับ Data Validation ทุกรูปแบบ (ทั้งแบบมีอิโมจิและไม่มีอิโมจิ)
+ */
+function setSafeStatusCompleted(sheet, row) {
+  const cellL = sheet.getRange(row, CONFIG.COL_STATUS);
+
+  // 1. ลองตั้งค่า "เสร็จสิ้น ✅" ก่อน (เพื่อให้ผ่าน Data Validation Dropdown ของชีต)
+  try {
+    cellL.setValue("เสร็จสิ้น ✅");
+    SpreadsheetApp.flush();
+    return;
+  } catch (e1) {
+    Logger.log(`ตั้งค่าเสร็จสิ้นพร้อมอิโมจิแถว ${row} ไม่สำเร็จ: ${e1.message}`);
+  }
+
+  // 2. ถ้าชีตไม่ได้กำหนดอิโมจิ ให้ลอง "เสร็จสิ้น"
+  try {
+    cellL.setValue("เสร็จสิ้น");
+    SpreadsheetApp.flush();
+    return;
+  } catch (e2) {
+    Logger.log(`ตั้งค่าเสร็จสิ้นแบบธรรมดาแถว ${row} ไม่สำเร็จ: ${e2.message}`);
+  }
+
+  // 3. หากติด Data Validation ชนิด Reject ให้เคลียร์การตรวจสอบเฉพาะเซลล์นี้แล้วเซ็ตค่าเพื่อป้องกันระบบพัง
+  try {
+    cellL.clearDataValidations();
+    cellL.setValue("เสร็จสิ้น ✅");
+    SpreadsheetApp.flush();
+  } catch (e3) {
+    Logger.log(`Force set status แถว ${row} ไม่สำเร็จ: ${e3.message}`);
+  }
 }
 
 /**

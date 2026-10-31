@@ -66,11 +66,27 @@ export async function POST(req: NextRequest) {
       }
 
       if (responseText.includes("ppConfig") || responseText.includes("<!DOCTYPE html>")) {
+        // ดึงข้อความข้อผิดพลาดจริงจากหน้า HTML ของ Google หากมี
+        const bodyMatch = responseText.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+        let detailError = "";
+        if (bodyMatch && bodyMatch[1]) {
+          const stripped = bodyMatch[1]
+            .replace(/<script[\s\S]*?<\/script>/gi, "")
+            .replace(/<style[\s\S]*?<\/style>/gi, "")
+            .replace(/<[^>]+>/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+          if (stripped && (stripped.includes("ข้อมูลที่ป้อน") || stripped.includes("ข้อผิดพลาด") || stripped.includes("Exception"))) {
+            detailError = stripped;
+          }
+        }
+
         return NextResponse.json(
           {
             success: false,
-            message:
-              "Google Apps Script ใช้เวลาประมวลผลนานเกินกำหนด (Timeout) หรือโค้ดใน Apps Script ยังเป็นเวอร์ชันเก่า โปรดคัดลอกไฟล์ Code.gs ล่าสุดไปวางใน Google Apps Script แล้วกด Deploy New version",
+            message: detailError
+              ? `ข้อผิดพลาดจาก Google Sheets: ${detailError}`
+              : "Google Apps Script ใช้เวลาประมวลผลนานเกินกำหนด (Timeout) หรือโค้ดใน Apps Script ยังเป็นเวอร์ชันเก่า โปรดคัดลอกไฟล์ Code.gs ล่าสุดไปวางใน Google Apps Script แล้วกด Deploy New version",
           },
           { status: 502 }
         );
