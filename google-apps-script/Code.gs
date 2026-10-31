@@ -1175,7 +1175,7 @@ function getMonthlyRootFolders(sheet) {
 
   if (!thFolder) {
     const f3Val = sheet.getRange(3, 6).getValue() || "";
-    throw new Error(`ไม่พบโฟลเดอร์ Google Drive ของ TH ในช่อง F3 (ค่าในช่องคือ "${f3Val}") กรุณาตรวจสอบว่ามีโฟลเดอร์ชื่อ M11 หรือ ใบขาย พ.ย. NOV 69 ใน Google Drive`);
+    throw new Error(`ไม่พบโฟลเดอร์ Google Drive ของ TH ในช่อง F3 (ค่าในช่องคือ "${f3Val}") กรุณาตรวจสอบว่ามีโฟลเดอร์ชื่อ เดือน 11 หรือ ใบขาย พ.ย. NOV 69 ใน Google Drive`);
   }
 
   // บันทึกใส่ Cache 6 ชั่วโมง พร้อมระบุ verified: true
