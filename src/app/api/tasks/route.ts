@@ -7,7 +7,7 @@ interface CacheEntry {
 }
 
 const serverTasksCache = new Map<string, CacheEntry>();
-const CACHE_TTL_MS = 60000; // แคชฝั่งเซิร์ฟเวอร์ 60 วินาทีเพื่อความเร็วระดับ 0ms
+const CACHE_TTL_MS = 15000; // แคชฝั่งเซิร์ฟเวอร์ 15 วินาทีเพื่อป้องกันยิงซ้ำติดๆ กัน แต่รับประกันความสดใหม่ Realtime
 
 // ฟังก์ชันจัดเรียงแท็บวันที่ (เช่น 15 พย -> 1 พย -> 31 ตค -> 1 ตค)
 function sortThaiDateSheets(sheets: string[]): string[] {
@@ -179,6 +179,10 @@ export async function GET(req: NextRequest) {
 
     // กรณีดึงรายการงาน (action=getTasks)
     const isForce = searchParams.get("force") === "true";
+    if (isForce) {
+      serverTasksCache.clear();
+    }
+
     const sheetParam = sheet || "ALL";
     const requestedSheets = sheetParam
       .split(",")
@@ -202,6 +206,7 @@ export async function GET(req: NextRequest) {
       targetUrl.searchParams.set("sheet", "ALL");
       targetUrl.searchParams.set("assignee", assignee);
       targetUrl.searchParams.set("pendingOnly", "false");
+      if (isForce) targetUrl.searchParams.set("force", "true");
 
       const res = await fetch(targetUrl.toString(), {
         method: "GET",
@@ -232,6 +237,7 @@ export async function GET(req: NextRequest) {
                   sUrl.searchParams.set("sheet", sName);
                   sUrl.searchParams.set("assignee", assignee);
                   sUrl.searchParams.set("pendingOnly", "false");
+                  if (isForce) sUrl.searchParams.set("force", "true");
                   const sRes = await fetch(sUrl.toString(), { redirect: "follow", cache: "no-store" });
                   const sJson = await sRes.json();
                   return sJson.tasks || [];
@@ -264,6 +270,7 @@ export async function GET(req: NextRequest) {
       targetUrl.searchParams.set("sheet", sName);
       targetUrl.searchParams.set("assignee", assignee);
       targetUrl.searchParams.set("pendingOnly", "false");
+      if (isForce) targetUrl.searchParams.set("force", "true");
 
       const res = await fetch(targetUrl.toString(), {
         method: "GET",
@@ -297,6 +304,7 @@ export async function GET(req: NextRequest) {
             sUrl.searchParams.set("sheet", sName);
             sUrl.searchParams.set("assignee", assignee);
             sUrl.searchParams.set("pendingOnly", "false");
+            if (isForce) sUrl.searchParams.set("force", "true");
 
             const sRes = await fetch(sUrl.toString(), {
               method: "GET",
@@ -363,12 +371,10 @@ export async function GET(req: NextRequest) {
         };
       });
 
-      // จัดเรียง: วันที่ล่าสุดขึ้นก่อน และงานที่ยังไม่เสร็จขึ้นก่อน
+      // จัดเรียงตามลำดับแถวบนชีตจริงจากบนลงล่างเสมอ (Row 2, 3, 4, 5...)
+      // เพื่อให้เลขลำดับงาน (No.) และแถว เรียงถูกต้องเหมือนบนชีต ไม่กลับหัว
       tasks.sort((a: any, b: any) => {
-        if (a.isCompleted !== b.isCompleted) {
-          return a.isCompleted ? 1 : -1;
-        }
-        return (b.row || 0) - (a.row || 0);
+        return (a.row || 0) - (b.row || 0);
       });
 
       const responsePayload = {

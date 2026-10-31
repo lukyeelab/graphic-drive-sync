@@ -929,7 +929,7 @@ function fetchSheetsGridDataFast(spreadsheetId, sheetNames) {
     const rangesParam = sheetNames
       .map(name => `ranges=${encodeURIComponent(`'${name}'!A1:L${maxRow}`)}`)
       .join("&");
-    const fields = "sheets(properties(title),data(rowData(values(formattedValue,hyperlink,note,textFormatRuns(format(link(uri))),chipRuns(chip(richLinkProperties(uri)))))))";
+    const fields = "sheets(properties(title),data(rowData(values(formattedValue,hyperlink,note,userEnteredValue(formulaValue),textFormatRuns(format(link(uri))),chipRuns(chip(richLinkProperties(uri),driveProperties(fileId)))))))";
     const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?${rangesParam}&fields=${encodeURI(fields)}`;
 
     const res = UrlFetchApp.fetch(apiUrl, {
@@ -984,18 +984,32 @@ function extractApiCellInfo(cellObj) {
   const note = (cellObj.note || "").toString().trim();
   let link = cellObj.hyperlink || "";
 
-  // 1. ดึงลิงก์จาก Google Drive Smart Chip ทันที (ไม่ต้องค้นหาใน DriveApp!)
+  // 1. ดึงจาก Formula เช่น =HYPERLINK("https://...", "...")
+  if (!link && cellObj.userEnteredValue && cellObj.userEnteredValue.formulaValue) {
+    const f = cellObj.userEnteredValue.formulaValue;
+    if (typeof f === "string" && f.toUpperCase().includes("HYPERLINK")) {
+      const m = f.match(/HYPERLINK\(\s*["']([^"']+)["']/i);
+      if (m && m[1]) link = m[1].trim();
+    }
+  }
+
+  // 2. ดึงลิงก์จาก Google Drive Smart Chip ทันที (ทั้ง richLinkProperties และ driveProperties)
   if (!link && cellObj.chipRuns && cellObj.chipRuns.length > 0) {
     for (let i = 0; i < cellObj.chipRuns.length; i++) {
-      const uri = cellObj.chipRuns[i].chip?.richLinkProperties?.uri;
-      if (uri) {
-        link = uri.trim();
+      const chip = cellObj.chipRuns[i].chip;
+      if (!chip) continue;
+      if (chip.richLinkProperties?.uri) {
+        link = chip.richLinkProperties.uri.trim();
+        break;
+      }
+      if (chip.driveProperties?.fileId) {
+        link = "https://drive.google.com/drive/folders/" + chip.driveProperties.fileId;
         break;
       }
     }
   }
 
-  // 2. ดึงจาก textFormatRuns เผื่อมี hyperlink อยู่ใน run
+  // 3. ดึงจาก textFormatRuns เผื่อมี hyperlink อยู่ใน run
   if (!link && cellObj.textFormatRuns && cellObj.textFormatRuns.length > 0) {
     for (let i = 0; i < cellObj.textFormatRuns.length; i++) {
       const uri = cellObj.textFormatRuns[i].format?.link?.uri;
@@ -1006,7 +1020,7 @@ function extractApiCellInfo(cellObj) {
     }
   }
 
-  // 3. กรณีวาง URL ตรงๆ ในช่อง
+  // 4. กรณีวาง URL ตรงๆ ในช่อง
   if (!link && title) {
     if (title.startsWith("http://") || title.startsWith("https://")) {
       link = title;
@@ -1038,13 +1052,14 @@ function fastFormatPresentationUrl(rawUrl) {
 }
 
 /**
- * ดึงรายการงานตามชื่อพนักงาน (Zero-Wait Version: Batch Cache getAll/putAll + ตัด DriveApp Search 100%)
+ * ดึงรายการงานตามชื่อพนักงาน (Zero-Wait Version: Batch Cache getAll/putAll + ตัด DriveApp Search 100% + รองรับ Realtime Force Refresh)
  */
-function getStaffTasks(assignee, targetSheet, pendingOnly) {
+function getStaffTasks(assignee, targetSheet, pendingOnly, force) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const ssId = ss.getId();
   const scriptCache = CacheService.getScriptCache();
   const allSheetNames = getSheetNamesFast(ss);
+  const isForce = force === true || force === "true";
 
   let targetSheetNames = [];
   if (targetSheet && targetSheet !== "ALL") {
@@ -1071,12 +1086,12 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
     cacheKeysToRequest.push(key);
   }
 
-  // 1. ดึงข้อมูลทุกแผ่นงานจาก Cache ในคำสั่งเดียว (Batch getAll เร็วกว่าดึงทีละอันมาก)
-  const cachedBatch = scriptCache.getAll(cacheKeysToRequest);
+  // 1. ดึงข้อมูลจาก Cache เฉพาะเมื่อไม่ได้สั่ง force refresh
+  const cachedBatch = !isForce ? scriptCache.getAll(cacheKeysToRequest) : {};
   for (let i = 0; i < targetSheetNames.length; i++) {
     const sName = targetSheetNames[i];
     const key = cacheKeyMap[sName];
-    if (cachedBatch && cachedBatch[key]) {
+    if (!isForce && cachedBatch && cachedBatch[key]) {
       try {
         sheetsTasksMap[sName] = JSON.parse(cachedBatch[key]);
         continue;
@@ -1085,7 +1100,7 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
     sheetsToFetchFromApi.push(sName);
   }
 
-  // 2. แผ่นงานไหนยังไม่อยู่ใน Cache ให้ดึงด้วย Sheets API v4 รวดเดียวแล้วบันทึกเข้า Batch Cache นาน 5 นาที (300 วินาที)
+  // 2. แผ่นงานไหนยังไม่อยู่ใน Cache หรือถูก Force ให้ดึงด้วย Sheets API v4 ทันที
   if (sheetsToFetchFromApi.length > 0) {
     const apiData = fetchSheetsGridDataFast(ssId, sheetsToFetchFromApi);
     const cacheToPut = {};
@@ -1125,7 +1140,7 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
 
           if (!rowAssignee && !noVal && !uploadCellText) continue;
 
-          const uploadUrl = uploadInfo.link;
+          let uploadUrl = uploadInfo.link;
           const cellNote = uploadInfo.note;
           let interFolderUrl = "";
           const noteMatch = cellNote.match(/INTER:\s*(https:\/\/[^\s]+)/i);
@@ -1134,6 +1149,19 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
           }
 
           const isCompleted = status.includes("เสร็จสิ้น") || (uploadUrl !== "" && uploadCellText !== "");
+          // หากสถานะเสร็จสิ้นและมีชื่อโฟลเดอร์ แต่ยังไม่ได้ลิงก์ ให้ค้นหาโฟลเดอร์ใน Drive ทันที
+          if (!uploadUrl && uploadCellText && isCompleted) {
+            try {
+              const fIter = DriveApp.getFoldersByName(uploadCellText);
+              while (fIter.hasNext()) {
+                const f = fIter.next();
+                if (!f.isTrashed()) {
+                  uploadUrl = f.getUrl();
+                  break;
+                }
+              }
+            } catch (e) {}
+          }
           let taskBriefLink = fastFormatPresentationUrl(currentBriefLink);
           if (!taskBriefLink && currentBriefTitle) {
             try {
@@ -1170,7 +1198,7 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
 
       try {
         if (Object.keys(cacheToPut).length > 0) {
-          scriptCache.putAll(cacheToPut, 300); // แคชไว้นาน 5 นาที
+          scriptCache.putAll(cacheToPut, 20); // แคชสั้น 20 วินาที เพื่อให้เร็วแต่รับประกันความ Realtime
         }
       } catch (e) {}
     } else {
@@ -1222,7 +1250,7 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
           const uploadRich = richTexts[rowIdx][CONFIG.COL_UPLOAD_LINK - 1];
           const uploadFormula = formulas[rowIdx][CONFIG.COL_UPLOAD_LINK - 1];
           const extractedUpload = extractCellLinkAndTitle(uploadCellText, uploadRich, uploadFormula);
-          const uploadUrl = extractedUpload.link;
+          let uploadUrl = extractedUpload.link;
 
           const cellNote = (notes[rowIdx] && notes[rowIdx][CONFIG.COL_UPLOAD_LINK - 1]) || "";
           let interFolderUrl = "";
@@ -1232,6 +1260,18 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
           }
 
           const isCompleted = status.includes("เสร็จสิ้น") || (uploadUrl !== "" && uploadCellText !== "");
+          if (!uploadUrl && uploadCellText && isCompleted) {
+            try {
+              const fIter = DriveApp.getFoldersByName(uploadCellText);
+              while (fIter.hasNext()) {
+                const f = fIter.next();
+                if (!f.isTrashed()) {
+                  uploadUrl = f.getUrl();
+                  break;
+                }
+              }
+            } catch (e) {}
+          }
           let taskBriefLink = fastFormatPresentationUrl(currentBriefLink);
           if (!taskBriefLink && currentBriefTitle) {
             try {
@@ -1268,7 +1308,7 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
 
       try {
         if (Object.keys(cacheToPut).length > 0) {
-          scriptCache.putAll(cacheToPut, 300);
+          scriptCache.putAll(cacheToPut, 20); // แคชสั้น 20 วินาที
         }
       } catch (e) {}
     }
@@ -1296,6 +1336,11 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
       finalTasks.push(item);
     }
   }
+
+  // เรียงลำดับตามแถวบนชีตจริงจากบนลงล่างเสมอ (Row 2, 3, 4...)
+  finalTasks.sort(function(a, b) {
+    return (a.row || 0) - (b.row || 0);
+  });
 
   return {
     success: true,
@@ -1565,7 +1610,8 @@ function doGet(e) {
       const assignee = e.parameter.assignee || "";
       const sheet = e.parameter.sheet || "";
       const pendingOnly = e.parameter.pendingOnly === "true";
-      data = getStaffTasks(assignee, sheet, pendingOnly);
+      const force = e.parameter.force === "true";
+      data = getStaffTasks(assignee, sheet, pendingOnly, force);
     } else if (action === "resolveBrief") {
       const title = e.parameter.title || "";
       const slideUrl = resolveBriefSlideUrl(title);

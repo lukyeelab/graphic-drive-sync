@@ -23,6 +23,8 @@ import {
   Edit3,
   Globe,
   Copy,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 
 interface Task {
@@ -62,7 +64,6 @@ const CATEGORY_COLORS: Record<string, { bg: string; text: string; border: string
 export default function HomePage() {
   const [assignee, setAssignee] = useState<string>("ลูกหยี");
   const [selectedSheets, setSelectedSheets] = useState<string[]>([]);
-  const [showAllDatesTray, setShowAllDatesTray] = useState<boolean>(false);
   const sheetName = selectedSheets.includes("ALL")
     ? "ทุกวันที่ (ALL)"
     : selectedSheets.length > 0
@@ -104,6 +105,22 @@ export default function HomePage() {
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const clientSheetCacheRef = useRef<Record<string, Task[]>>({});
+  const dateDropdownRef = useRef<HTMLDivElement>(null);
+  const [isDateDropdownOpen, setIsDateDropdownOpen] = useState<boolean>(false);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        dateDropdownRef.current &&
+        !dateDropdownRef.current.contains(event.target as Node)
+      ) {
+        setIsDateDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   const getTaskKey = (sheet: string, row: number) => `${sheet}_${row}`;
 
   const copyToClipboard = (url: string, label: string) => {
@@ -128,10 +145,8 @@ export default function HomePage() {
     loadedTasks.forEach((t) => {
       const key = getTaskKey(t.sheetName, t.row);
       const taskNameStr = (t.taskName || "").trim();
-      // ถ้าในชีตมีชื่องานอยู่แล้ว ให้ดึงมาใส่ในกล่องข้อความเสมอ
-      // ถ้ายังไม่มี ให้ตั้งค่าเริ่มต้นแนะนำเป็น `${task.no} ${task.category}` เพื่อความสะดวก
-      const defaultName = taskNameStr || `${t.no || 1} ${t.category || ""}`.trim();
-      nameMap[key] = defaultName;
+      // ดึงชื่องานจากชีตจริงเสมอ ถ้าในชีตไม่มีหรือผู้ใช้ลบออก ให้เป็นค่าว่าง ""
+      nameMap[key] = taskNameStr;
       if (!t.isCompleted) {
         pendingKeys.push(key);
       }
@@ -143,22 +158,14 @@ export default function HomePage() {
       }
     });
 
-    setTaskNamesMap((prev) => ({ ...nameMap, ...prev }));
+    // อัปเดต State ตรงตามข้อมูลสดจริงจาก Google Sheets ทันที (ไม่เก็บค่าเก่าที่ถูกลบไปแล้ว)
+    setTaskNamesMap(nameMap);
     setSelectedTaskKeys(pendingKeys);
+    setFolderLinksMap(incomingLinks);
 
-    setFolderLinksMap((prev) => {
-      const merged = { ...prev };
-      for (const k in incomingLinks) {
-        merged[k] = {
-          thUrl: incomingLinks[k].thUrl || merged[k]?.thUrl || "",
-          interUrl: incomingLinks[k].interUrl || merged[k]?.interUrl || "",
-        };
-      }
-      try {
-        localStorage.setItem("gds_folder_links", JSON.stringify(merged));
-      } catch (e) {}
-      return merged;
-    });
+    try {
+      localStorage.setItem("gds_folder_links", JSON.stringify(incomingLinks));
+    } catch (e) {}
   };
 
   // ดึงงานของแผ่นงานมารอไว้ล่วงหน้าเงียบๆ (Prefetch)
@@ -229,6 +236,10 @@ export default function HomePage() {
 
     if (sheetsArray.length === 0) return;
 
+    if (forceLoading) {
+      clientSheetCacheRef.current = {};
+    }
+
     // 1. ตรวจสอบว่าใน Client Cache มีครบทุกชีตที่เลือกหรือไม่ ถ้ามีครบให้แสดงผลทันทีใน 0 มิลลิวินาที
     const isAllCached =
       !forceLoading &&
@@ -268,10 +279,11 @@ export default function HomePage() {
     try {
       const sheetsParam = sheetsArray.join(",");
       const queryAssignee = sheetsArray.includes("ALL") ? targetAssignee : "ALL";
+      const forceQuery = forceLoading ? "&force=true" : "";
       const res = await fetch(
         `/api/tasks?action=getTasks&sheet=${encodeURIComponent(sheetsParam)}&assignee=${encodeURIComponent(
           queryAssignee
-        )}&pendingOnly=false`,
+        )}&pendingOnly=false${forceQuery}&_t=${Date.now()}`,
         { signal: controller.signal }
       );
       clearTimeout(timeoutId);
@@ -333,7 +345,7 @@ export default function HomePage() {
     }
     setSelectedSheets(updated);
     localStorage.setItem("gds_selectedSheets", JSON.stringify(updated));
-    fetchTasks(assignee, updated);
+    fetchTasks(assignee, updated, true);
   };
 
   // Quick Presets: วันนี้, 3 วันล่าสุด, 7 วันล่าสุด, ทุกวันที่ (ALL)
@@ -352,7 +364,7 @@ export default function HomePage() {
     if (target.length > 0) {
       setSelectedSheets(target);
       localStorage.setItem("gds_selectedSheets", JSON.stringify(target));
-      fetchTasks(assignee, target);
+      fetchTasks(assignee, target, true);
     }
   };
 
@@ -378,7 +390,7 @@ export default function HomePage() {
     setAssignee(newName);
     localStorage.setItem("gds_assignee", newName);
     if (selectedSheets.length > 0) {
-      fetchTasks(newName, selectedSheets);
+      fetchTasks(newName, selectedSheets, true);
     }
   };
 
@@ -501,6 +513,11 @@ export default function HomePage() {
     groupedTasksByDate[t.sheetName].push(t);
   });
 
+  // เรียงลำดับงานตามแถว (Row) จากน้อยไปหามาก (Row 2, 3, 4...) เพื่อให้ตรงกับแถวบน Google Sheet 100%
+  Object.keys(groupedTasksByDate).forEach((s) => {
+    groupedTasksByDate[s].sort((a, b) => (a.row || 0) - (b.row || 0));
+  });
+
   const totalTasks = tasks.length;
   const pendingTasks = tasks.filter((t) => !t.isCompleted).length;
   const completedTasks = totalTasks - pendingTasks;
@@ -567,16 +584,16 @@ export default function HomePage() {
         )}
 
         {/* Filter Controls Card */}
-        <section className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-            {/* Staff Selector */}
+        <section className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs relative">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
+            {/* 1. Staff Selector */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
                   <User className="w-3.5 h-3.5 text-indigo-600" />
                   <span>ชื่อพนักงาน / กราฟิก</span>
                 </label>
-                <span className="text-[10px] text-slate-400">เลือกหรือพิมพ์ชื่อ</span>
+                <span className="text-[10px] text-slate-400">เลือกหรือพิมพ์</span>
               </div>
               <div className="relative">
                 <input
@@ -595,7 +612,190 @@ export default function HomePage() {
               </div>
             </div>
 
-            {/* Search Category */}
+            {/* 2. Compact Date Dropdown with Checkboxes in front */}
+            <div className="relative" ref={dateDropdownRef}>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>เลือกวันที่ต้องการดูงาน</span>
+                </label>
+                <span className="text-[10px] text-indigo-600 font-bold">
+                  {selectedSheets.includes("ALL")
+                    ? "ทุกวัน (ALL)"
+                    : `เลือกแล้ว ${selectedSheets.length} วัน`}
+                </span>
+              </div>
+
+              {/* Dropdown Toggle Button */}
+              <button
+                type="button"
+                onClick={() => setIsDateDropdownOpen((prev) => !prev)}
+                disabled={isMetadataLoading}
+                className="w-full flex items-center justify-between px-3 py-2 text-sm bg-slate-50 hover:bg-white border border-slate-200 rounded-xl transition-all cursor-pointer font-medium text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-left shadow-2xs"
+              >
+                <span className="truncate pr-1">
+                  {isMetadataLoading ? (
+                    <span className="text-slate-400">⏳ กำลังดึงวันที่...</span>
+                  ) : selectedSheets.includes("ALL") ? (
+                    <span className="text-indigo-700 font-bold">🌐 ทุกวันที่ (ALL)</span>
+                  ) : selectedSheets.length === 0 ? (
+                    <span className="text-slate-400">เลือกวันที่...</span>
+                  ) : selectedSheets.length <= 2 ? (
+                    <span>📅 {selectedSheets.join(", ")}</span>
+                  ) : (
+                    <span>
+                      📅 {selectedSheets.slice(0, 2).join(", ")}{" "}
+                      <span className="text-xs text-indigo-600 font-bold">
+                        (+{selectedSheets.length - 2})
+                      </span>
+                    </span>
+                  )}
+                </span>
+                {isDateDropdownOpen ? (
+                  <ChevronUp className="w-4 h-4 text-slate-400 shrink-0" />
+                ) : (
+                  <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
+                )}
+              </button>
+
+              {/* Dropdown Popover with Checkboxes */}
+              {isDateDropdownOpen && (
+                <div className="absolute left-0 right-0 sm:w-80 sm:right-auto mt-2 bg-white border border-slate-200 rounded-2xl shadow-2xl z-50 p-3.5 animate-in fade-in duration-150">
+                  <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100">
+                    <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                      <Calendar className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>เลือกวันที่</span>
+                    </span>
+                    <span className="text-[10px] text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full font-bold">
+                      {selectedSheets.includes("ALL")
+                        ? "ทุกวันที่"
+                        : `${selectedSheets.length} วัน`}
+                    </span>
+                  </div>
+
+                  {/* Quick Preset Buttons */}
+                  <div className="grid grid-cols-2 gap-1.5 mb-2.5">
+                    <button
+                      type="button"
+                      onClick={() => handleSelectPreset("today")}
+                      className={`px-2 py-1 text-xs font-bold rounded-lg border text-center transition-all cursor-pointer ${
+                        selectedSheets.length === 1 && selectedSheets[0] === availableSheets[0]
+                          ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs"
+                          : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                      }`}
+                    >
+                      ⚡ วันนี้
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectPreset("last3")}
+                      className={`px-2 py-1 text-xs font-bold rounded-lg border text-center transition-all cursor-pointer ${
+                        selectedSheets.length === 3 && !selectedSheets.includes("ALL")
+                          ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs"
+                          : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                      }`}
+                    >
+                      ⚡ 3 วันล่าสุด
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectPreset("last7")}
+                      className={`px-2 py-1 text-xs font-bold rounded-lg border text-center transition-all cursor-pointer ${
+                        selectedSheets.length === 7 && !selectedSheets.includes("ALL")
+                          ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs"
+                          : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                      }`}
+                    >
+                      ⚡ 7 วันล่าสุด
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectPreset("all")}
+                      className={`px-2 py-1 text-xs font-bold rounded-lg border text-center transition-all cursor-pointer ${
+                        selectedSheets.includes("ALL")
+                          ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs"
+                          : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                      }`}
+                    >
+                      🌐 ทุกวัน (ALL)
+                    </button>
+                  </div>
+
+                  {/* Scrollable Date Checkbox List */}
+                  <div className="max-h-56 overflow-y-auto space-y-1 pr-1 border-t border-slate-100 pt-2">
+                    {availableSheets.length === 0 ? (
+                      <div className="py-4 text-center text-xs text-slate-400 italic">
+                        ⏳ กำลังดึงวันที่...
+                      </div>
+                    ) : (
+                      availableSheets.map((s, idx) => {
+                        const isChecked = selectedSheets.includes(s) && !selectedSheets.includes("ALL");
+                        const isLatest = idx === 0;
+
+                        return (
+                          <label
+                            key={s}
+                            className={`flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs font-medium cursor-pointer transition-colors ${
+                              isChecked
+                                ? "bg-indigo-50 text-indigo-900 font-bold border border-indigo-200/70"
+                                : "hover:bg-slate-50 text-slate-700 border border-transparent"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => handleToggleSheet(s)}
+                                className="w-4 h-4 text-indigo-600 rounded-sm focus:ring-indigo-500 cursor-pointer"
+                              />
+                              <span>{s}</span>
+                            </div>
+                            {isLatest && (
+                              <span
+                                className={`text-[9px] px-1.5 py-0.5 rounded-md font-bold uppercase ${
+                                  isChecked
+                                    ? "bg-indigo-600 text-white"
+                                    : "bg-emerald-100 text-emerald-800"
+                                }`}
+                              >
+                                ล่าสุด
+                              </span>
+                            )}
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  {/* Dropdown Footer */}
+                  <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (availableSheets.length > 0) {
+                          const reset = [availableSheets[0]];
+                          setSelectedSheets(reset);
+                          localStorage.setItem("gds_selectedSheets", JSON.stringify(reset));
+                          fetchTasks(assignee, reset);
+                        }
+                      }}
+                      className="text-[11px] text-slate-400 hover:text-rose-600 font-medium cursor-pointer transition-colors"
+                    >
+                      รีเซ็ตวันล่าสุด
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsDateDropdownOpen(false)}
+                      className="px-3 py-1 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg cursor-pointer transition-all"
+                    >
+                      ตกลง
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 3. Search Category */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1.5 flex items-center gap-1.5">
                 <Search className="w-3.5 h-3.5 text-slate-400" />
@@ -610,7 +810,7 @@ export default function HomePage() {
               />
             </div>
 
-            {/* Refresh Button */}
+            {/* 4. Refresh Button */}
             <div>
               <button
                 onClick={() => {
@@ -632,165 +832,30 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* Multi-Date Selection Box with Checkbox Pills & Quick Presets */}
-          <div className="bg-slate-50/90 p-4 rounded-2xl border border-slate-200/90 mt-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
-              <div className="flex items-center gap-2 flex-wrap">
-                <Calendar className="w-4 h-4 text-indigo-600" />
-                <span className="text-xs font-bold text-slate-800">
-                  เลือกวันที่ต้องการดูงาน
+          {/* Sub-bar: Status Filter & Selection Summary */}
+          <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between flex-wrap gap-2 text-xs">
+            <div className="flex items-center gap-4 flex-wrap">
+              <label className="inline-flex items-center gap-2 cursor-pointer font-medium text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={pendingOnly}
+                  onChange={(e) => setPendingOnly(e.target.checked)}
+                  className="w-4 h-4 text-indigo-600 rounded-sm focus:ring-indigo-500 cursor-pointer"
+                />
+                <span>แสดงเฉพาะงานที่ <b>&quot;ยังไม่ได้อัปงาน (ยังไม่เสร็จสิ้น)&quot;</b></span>
+              </label>
+
+              {!selectedSheets.includes("ALL") && selectedSheets.length > 0 && (
+                <span className="text-[11px] text-slate-500 flex items-center gap-1.5">
+                  <span>กำลังดู:</span>
+                  <span className="font-bold text-indigo-900 bg-indigo-50/80 px-2 py-0.5 rounded-md border border-indigo-100">
+                    {selectedSheets.join(", ")}
+                  </span>
                 </span>
-                <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200">
-                  {selectedSheets.includes("ALL")
-                    ? "แสดงทุกวันที่ (ALL)"
-                    : `เลือกแล้ว ${selectedSheets.length} วัน`}
-                </span>
-              </div>
-
-              {/* Quick Presets (1-Click Fast Action) */}
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-[11px] text-slate-400 font-medium mr-1">เลือกด่วน:</span>
-                <button
-                  type="button"
-                  onClick={() => handleSelectPreset("today")}
-                  className={`px-2.5 py-1 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
-                    selectedSheets.length === 1 && selectedSheets[0] === availableSheets[0]
-                      ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs"
-                      : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
-                  }`}
-                >
-                  ⚡ วันนี้
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleSelectPreset("last3")}
-                  className={`px-2.5 py-1 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
-                    selectedSheets.length === 3 && !selectedSheets.includes("ALL")
-                      ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs"
-                      : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
-                  }`}
-                >
-                  ⚡ 3 วันล่าสุด
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleSelectPreset("last7")}
-                  className={`px-2.5 py-1 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
-                    selectedSheets.length === 7 && !selectedSheets.includes("ALL")
-                      ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs"
-                      : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
-                  }`}
-                >
-                  ⚡ 7 วันล่าสุด
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleSelectPreset("all")}
-                  className={`px-2.5 py-1 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
-                    selectedSheets.includes("ALL")
-                      ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs"
-                      : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
-                  }`}
-                >
-                  🌐 ทุกวันที่ (ALL)
-                </button>
-              </div>
-            </div>
-
-            {/* Checkbox Pills Grid */}
-            <div className="flex flex-wrap gap-2 pt-1">
-              {availableSheets.length === 0 ? (
-                <span className="text-xs text-slate-400 italic">⏳ กำลังดึงวันที่จากชีตจริง...</span>
-              ) : (
-                availableSheets.slice(0, showAllDatesTray ? availableSheets.length : 14).map((s, idx) => {
-                  const isChecked = selectedSheets.includes(s) && !selectedSheets.includes("ALL");
-                  const isLatest = idx === 0;
-
-                  return (
-                    <button
-                      key={s}
-                      type="button"
-                      onClick={() => handleToggleSheet(s)}
-                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer select-none ${
-                        isChecked
-                          ? "bg-indigo-600 text-white border-indigo-600 shadow-xs ring-2 ring-indigo-500/20"
-                          : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100 hover:border-slate-300"
-                      }`}
-                    >
-                      {isChecked ? (
-                        <CheckSquare className="w-3.5 h-3.5 text-white" />
-                      ) : (
-                        <Square className="w-3.5 h-3.5 text-slate-400" />
-                      )}
-                      <span>{s}</span>
-                      {isLatest && (
-                        <span
-                          className={`text-[9px] px-1 py-0.2 rounded-sm font-bold uppercase ${
-                            isChecked ? "bg-white/20 text-white" : "bg-emerald-100 text-emerald-800"
-                          }`}
-                        >
-                          ล่าสุด
-                        </span>
-                      )}
-                    </button>
-                  );
-                })
-              )}
-
-              {/* Toggle More Dates Button if > 14 sheets */}
-              {availableSheets.length > 14 && (
-                <button
-                  type="button"
-                  onClick={() => setShowAllDatesTray((prev) => !prev)}
-                  className="px-2.5 py-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer"
-                >
-                  {showAllDatesTray
-                    ? "ย่อวันที่ ▲"
-                    : `+ ดูเพิ่มเติมอีก ${availableSheets.length - 14} วัน ▼`}
-                </button>
               )}
             </div>
 
-            {/* Summary Bar */}
-            {!selectedSheets.includes("ALL") && selectedSheets.length > 0 && (
-              <div className="mt-2.5 pt-2 border-t border-slate-200/60 flex items-center justify-between text-[11px] text-slate-500 flex-wrap gap-2">
-                <span>
-                  กำลังแสดงงานของวันที่:{" "}
-                  <b className="text-indigo-900 font-bold">{selectedSheets.join(", ")}</b>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (availableSheets.length > 0) {
-                      const reset = [availableSheets[0]];
-                      setSelectedSheets(reset);
-                      localStorage.setItem("gds_selectedSheets", JSON.stringify(reset));
-                      fetchTasks(assignee, reset);
-                    }
-                  }}
-                  className="text-slate-400 hover:text-rose-600 transition-colors font-medium cursor-pointer"
-                >
-                  รีเซ็ตเหลือวันล่าสุด
-                </button>
-              </div>
-            )}
-          </div>
-
-          <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between flex-wrap gap-2">
-            <label className="inline-flex items-center gap-2 cursor-pointer text-xs font-medium text-slate-700">
-              <input
-                type="checkbox"
-                checked={pendingOnly}
-                onChange={(e) => setPendingOnly(e.target.checked)}
-                className="w-4 h-4 text-indigo-600 rounded-sm focus:ring-indigo-500 cursor-pointer"
-              />
-              <span>แสดงเฉพาะงานที่ <b>&quot;ยังไม่ได้อัปงาน (ยังไม่เสร็จสิ้น)&quot;</b></span>
-            </label>
-
-            <span className="text-xs text-slate-500">
+            <span className="text-slate-500">
               พบทั้งหมด <b className="text-indigo-600 font-bold">{filteredTasks.length}</b> รายการของ <b>{assignee}</b>
             </span>
           </div>
@@ -1029,7 +1094,7 @@ export default function HomePage() {
                         <th className="py-3 px-4 w-44">ใบบรีฟ</th>
                         <th className="py-3 px-3 w-16 text-center">No.</th>
                         <th className="py-3 px-4">ชื่องาน/ชื่อโฟลเดอร์ (สำหรับสร้างโฟลเดอร์ TH)</th>
-                        <th className="py-3 px-4 text-center w-28">สถานะ</th>
+                        <th className="py-3 px-3 text-center min-w-[110px] w-28 whitespace-nowrap">สถานะ</th>
                         <th className="py-3 px-3 text-center min-w-[210px] w-56">ลิงก์โฟลเดอร์ (TH & INTER)</th>
                       </tr>
                     </thead>
@@ -1123,66 +1188,43 @@ export default function HomePage() {
                                   />
                                   <Edit3 className="w-3.5 h-3.5 text-slate-300 absolute right-2 top-2 pointer-events-none" />
                                 </div>
-
-                                {/* ถ้ามีลิงก์อยู่แล้ว ให้คลิกเปิดโฟลเดอร์ TH หรือ INTER ได้ทันทีตรงนี้เลย */}
-                                {(() => {
-                                  const linkInfo = folderLinksMap[key];
-                                  const thUrl = linkInfo?.thUrl || task.uploadUrl;
-                                  const interUrl = linkInfo?.interUrl || task.interFolderUrl;
-
-                                  if (!thUrl && !interUrl) return null;
-
-                                  return (
-                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                      {thUrl && (
-                                        <a
-                                          href={thUrl}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/90 px-1.5 py-0.5 rounded-md transition-colors shadow-2xs group"
-                                          title="คลิกเพื่อเปิดโฟลเดอร์ Google Drive (TH)"
-                                        >
-                                          <span>🇹🇭 เปิด TH</span>
-                                          <ExternalLink className="w-2.5 h-2.5 text-emerald-500 group-hover:text-emerald-700" />
-                                        </a>
-                                      )}
-                                      {interUrl && (
-                                        <a
-                                          href={interUrl}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="inline-flex items-center gap-1 text-[10px] font-bold text-sky-700 hover:text-sky-900 bg-sky-50 hover:bg-sky-100 border border-sky-200/90 px-1.5 py-0.5 rounded-md transition-colors shadow-2xs group"
-                                          title="คลิกเพื่อเปิดโฟลเดอร์ Google Drive (INTER)"
-                                        >
-                                          <span>🌐 เปิด INTER</span>
-                                          <ExternalLink className="w-2.5 h-2.5 text-sky-500 group-hover:text-sky-700" />
-                                        </a>
-                                      )}
-                                    </div>
-                                  );
-                                })()}
                               </div>
                             </td>
-                            <td className="py-3 px-4 text-center">
+                            <td className="py-3 px-3 text-center whitespace-nowrap">
                               {task.isCompleted ? (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                                  <CheckCircle2 className="w-3 h-3" />
-                                  เสร็จสิ้น
+                                <span className="inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-2xs">
+                                  <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                                  <span>เสร็จสิ้น</span>
                                 </span>
                               ) : (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200">
-                                  <Clock className="w-3 h-3" />
-                                  {task.status || "กำลังทำ"}
+                                <span className="inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-amber-50 text-amber-700 border border-amber-200 shadow-2xs">
+                                  <Clock className="w-3.5 h-3.5 shrink-0" />
+                                  <span>{task.status || "กำลังทำ"}</span>
                                 </span>
                               )}
                             </td>
                             <td className="py-3 px-3 text-center" onClick={(e) => e.stopPropagation()}>
                               {(() => {
                                 const linkInfo = folderLinksMap[key];
-                                const thUrl = linkInfo?.thUrl || task.uploadUrl;
+                                const taskNameForLink = (taskNamesMap[key] || task.taskName || "").trim();
+                                // ถ้ามี uploadUrl จากชีต/แคชให้ใช้ก่อน ถ้าไม่มีแต่ task เสร็จสิ้นและมีชื่อ ให้สร้างลิงก์ค้นหา Google Drive ตรงๆ เพื่อไม่ให้ขึ้นว่า 'รอสร้างโฟลเดอร์'
+                                const thUrl =
+                                  linkInfo?.thUrl ||
+                                  task.uploadUrl ||
+                                  (task.isCompleted && taskNameForLink
+                                    ? `https://drive.google.com/drive/search?q=type:folder%20${encodeURIComponent(taskNameForLink)}`
+                                    : "");
                                 const interUrl = linkInfo?.interUrl || task.interFolderUrl;
 
                                 if (!thUrl && !interUrl) {
+                                  if (task.isCompleted) {
+                                    return (
+                                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50/80 px-2.5 py-1 rounded-lg border border-emerald-200">
+                                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                        <span>เสร็จสิ้นแล้ว</span>
+                                      </span>
+                                    );
+                                  }
                                   return (
                                     <span className="text-xs text-slate-400 italic">รอสร้างโฟลเดอร์</span>
                                   );
@@ -1195,7 +1237,7 @@ export default function HomePage() {
                                         href={thUrl}
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100/90 border border-emerald-200/90 px-2 py-1 rounded-lg transition-all shadow-2xs hover:shadow-xs group"
+                                        className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100/90 border border-emerald-200/90 px-2 py-1 rounded-lg transition-all shadow-2xs hover:shadow-xs group whitespace-nowrap"
                                         title="คลิกเพื่อเปิดโฟลเดอร์ Google Drive (TH)"
                                       >
                                         <span>🇹🇭 เปิด TH</span>
@@ -1208,7 +1250,7 @@ export default function HomePage() {
                                         href={interUrl}
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        className="inline-flex items-center gap-1 text-[11px] font-bold text-sky-700 hover:text-sky-900 bg-sky-50 hover:bg-sky-100/90 border border-sky-200/90 px-2 py-1 rounded-lg transition-all shadow-2xs hover:shadow-xs group"
+                                        className="inline-flex items-center gap-1 text-[11px] font-bold text-sky-700 hover:text-sky-900 bg-sky-50 hover:bg-sky-100/90 border border-sky-200/90 px-2 py-1 rounded-lg transition-all shadow-2xs hover:shadow-xs group whitespace-nowrap"
                                         title="คลิกเพื่อเปิดโฟลเดอร์ Google Drive (INTER)"
                                       >
                                         <span>🌐 เปิด INTER</span>
