@@ -26,6 +26,7 @@ import {
   ChevronDown,
   ChevronUp,
   Loader2,
+  X,
 } from "lucide-react";
 
 interface Task {
@@ -1153,12 +1154,29 @@ const renderDateCheckbox = (s: string) => {
               </button>
 
               {!selectedSheets.includes("ALL") && selectedSheets.length > 0 && (
-                <span className="text-[11px] text-[#7A7368] flex items-center gap-1.5">
-                  <span>กำลังดู:</span>
-                  <span className="font-bold text-[#6E5D48] bg-[#F4EFE6] border border-[#E0D5C3] px-2 py-0.5 rounded-md">
-                    {selectedSheets.join(", ")}
-                  </span>
-                </span>
+                <div className="flex items-center flex-wrap gap-1.5 text-xs text-[#7A7368]">
+                  <span className="font-semibold text-[#7A7368] shrink-0">กำลังดู:</span>
+                  <div className="flex items-center flex-wrap gap-1.5">
+                    {selectedSheets.map((sheetName) => (
+                      <span
+                        key={sheetName}
+                        className="inline-flex items-center gap-1 font-bold text-[#5E513F] bg-[#F5EFE6] hover:bg-[#EAE3D6] border border-[#DED4C3] px-2.5 py-0.5 rounded-lg shadow-2xs transition-all text-xs"
+                      >
+                        <span>{sheetName}</span>
+                        {selectedSheets.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => handleToggleSheet(sheetName)}
+                            className="text-[#A8A196] hover:text-[#8C3A27] transition-colors cursor-pointer ml-0.5 p-0.5"
+                            title={`ปิดดูวันที่ ${sheetName}`}
+                          >
+                            <X className="w-2.5 h-2.5" />
+                          </button>
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
 
