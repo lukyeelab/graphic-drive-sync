@@ -122,8 +122,10 @@ export default function HomePage() {
     loadedTasks.forEach((t) => {
       const key = getTaskKey(t.sheetName, t.row);
       const taskNameStr = (t.taskName || "").trim();
-      const isAutoPattern = taskNameStr.endsWith(`_${t.sheetName}`) || !t.uploadUrl;
-      nameMap[key] = isAutoPattern && !t.uploadUrl ? "" : taskNameStr;
+      // ถ้าในชีตมีชื่องานอยู่แล้ว ให้ดึงมาใส่ในกล่องข้อความเสมอ
+      // ถ้ายังไม่มี ให้ตั้งค่าเริ่มต้นแนะนำเป็น `${task.no} ${task.category}` เพื่อความสะดวก
+      const defaultName = taskNameStr || `${t.no || 1} ${t.category || ""}`.trim();
+      nameMap[key] = defaultName;
       if (!t.isCompleted) {
         pendingKeys.push(key);
       }
@@ -910,20 +912,60 @@ export default function HomePage() {
                               {task.no || "-"}
                             </td>
                             <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
-                              <div className="relative">
-                                <input
-                                  type="text"
-                                  value={taskNamesMap[key] || ""}
-                                  onChange={(e) => {
-                                    setTaskNamesMap((prev) => ({
-                                      ...prev,
-                                      [key]: e.target.value,
-                                    }));
-                                  }}
-                                  placeholder="พิมพ์ชื่องาน/ชื่อโฟลเดอร์"
-                                  className="w-full px-2.5 py-1.5 text-xs font-medium bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all pr-7"
-                                />
-                                <Edit3 className="w-3.5 h-3.5 text-slate-300 absolute right-2 top-2 pointer-events-none" />
+                              <div className="flex flex-col gap-1.5">
+                                <div className="relative">
+                                  <input
+                                    type="text"
+                                    value={taskNamesMap[key] ?? ""}
+                                    onChange={(e) => {
+                                      setTaskNamesMap((prev) => ({
+                                        ...prev,
+                                        [key]: e.target.value,
+                                      }));
+                                    }}
+                                    placeholder="พิมพ์ชื่องาน/ชื่อโฟลเดอร์"
+                                    className="w-full px-2.5 py-1.5 text-xs font-medium bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all pr-7"
+                                  />
+                                  <Edit3 className="w-3.5 h-3.5 text-slate-300 absolute right-2 top-2 pointer-events-none" />
+                                </div>
+
+                                {/* ถ้ามีลิงก์อยู่แล้ว ให้คลิกเปิดโฟลเดอร์ TH หรือ INTER ได้ทันทีตรงนี้เลย */}
+                                {(() => {
+                                  const linkInfo = folderLinksMap[key];
+                                  const thUrl = linkInfo?.thUrl || task.uploadUrl;
+                                  const interUrl = linkInfo?.interUrl || task.interFolderUrl;
+
+                                  if (!thUrl && !interUrl) return null;
+
+                                  return (
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      {thUrl && (
+                                        <a
+                                          href={thUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/90 px-1.5 py-0.5 rounded-md transition-colors shadow-2xs group"
+                                          title="คลิกเพื่อเปิดโฟลเดอร์ Google Drive (TH)"
+                                        >
+                                          <span>🇹🇭 เปิด TH</span>
+                                          <ExternalLink className="w-2.5 h-2.5 text-emerald-500 group-hover:text-emerald-700" />
+                                        </a>
+                                      )}
+                                      {interUrl && (
+                                        <a
+                                          href={interUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="inline-flex items-center gap-1 text-[10px] font-bold text-sky-700 hover:text-sky-900 bg-sky-50 hover:bg-sky-100 border border-sky-200/90 px-1.5 py-0.5 rounded-md transition-colors shadow-2xs group"
+                                          title="คลิกเพื่อเปิดโฟลเดอร์ Google Drive (INTER)"
+                                        >
+                                          <span>🌐 เปิด INTER</span>
+                                          <ExternalLink className="w-2.5 h-2.5 text-sky-500 group-hover:text-sky-700" />
+                                        </a>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
                               </div>
                             </td>
                             <td className="py-3 px-4 text-center">

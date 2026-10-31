@@ -148,33 +148,229 @@ function parseDateFormats(sheetName) {
 }
 
 /**
- * ดึงหรือสร้างโฟลเดอร์ โดยตรวจสอบว่ามีโฟลเดอร์ที่มีชื่อใกล้เคียงกันอยู่แล้วหรือไม่
+ * ลบวรรณยุกต์และสระภาษาไทยที่มักพิมพ์ผิดหรือต่างกัน (่ ้ ๊ ๋ ์ ็ ิ ี ึ ื ุ ู)
  */
-function getOrCreateFolderFlexible(parentFolder, targetName, aliases) {
-  const cleanTarget = targetName.trim().toLowerCase();
+function stripThaiDiacritics(str) {
+  if (!str || typeof str !== "string") return "";
+  return str.replace(/[\u0E31\u0E34-\u0E3A\u0E47-\u0E4E]/g, "");
+}
+
+/**
+ * ปรับแต่งข้อความให้เป็นมาตรฐาน: ตัวพิมพ์เล็ก, ยุบช่องว่างซ้ำซ้อน, ตัดช่องว่างหัวท้าย
+ */
+function normalizeStringFuzzy(str) {
+  if (!str || typeof str !== "string") return "";
+  return str.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/**
+ * ตรวจจับและแปลงชื่อหมวดหมู่ที่พิมพ์ผิด หรือย่อ ให้เป็นชื่อมาตรฐานของ TH และ INTER
+ */
+function getCategoryInfoSmart(rawCategory) {
+  const cat = (rawCategory || "").toString().trim();
+  const catLower = cat.toLowerCase();
+  const catClean = stripThaiDiacritics(catLower).replace(/\s+/g, "");
+
+  // สล็อต / เกมสล็อต / Slot
+  if (catClean.includes("สลอต") || catLower.includes("slot")) {
+    return {
+      thTarget: "สล็อต SLOT",
+      interTarget: "SLOT",
+      keywords: ["สล็อต", "slot", "สลอต", "เกมสล็อต"]
+    };
+  }
+  // คาสิโน / บาคาร่า / Casino
+  if (catClean.includes("คาสโน") || catLower.includes("casino") || catClean.includes("บาคารา")) {
+    return {
+      thTarget: "คาสิโน CASINO",
+      interTarget: "CASINO",
+      keywords: ["คาสิโน", "casino", "คาสโน", "บาคาร่า"]
+    };
+  }
+  // บอล / ฟุตบอล / Football
+  if (catClean.includes("บอล") || catLower.includes("football") || catLower.includes("soccer")) {
+    return {
+      thTarget: "บอล FOOTBALL",
+      interTarget: "FOOTBALL",
+      keywords: ["บอล", "football", "ฟุตบอล", "soccer"]
+    };
+  }
+  // มวย / มวยไทย / Boxing
+  if (catClean.includes("มวย") || catLower.includes("boxing")) {
+    return {
+      thTarget: "มวย BOXING",
+      interTarget: "BOXING",
+      keywords: ["มวย", "boxing", "มวยไทย"]
+    };
+  }
+  // ไก่ชน / Cock Fighting
+  if (catClean.includes("ไกชน") || catClean.includes("ไก") || catLower.includes("cock")) {
+    return {
+      thTarget: "ไก่ชน COCK FIGHTING",
+      interTarget: "COCK FIGHTING",
+      keywords: ["ไก่ชน", "ไก่", "cock"]
+    };
+  }
+  // วัวชน / Cow Fighting
+  if (catClean.includes("ววชน") || catClean.includes("วว") || catLower.includes("cow")) {
+    return {
+      thTarget: "วัวชน COW FIGHTING",
+      interTarget: "COW FIGHTING",
+      keywords: ["วัวชน", "วัว", "cow"]
+    };
+  }
+  // หวย APB / Asia PowerBall / Lotto
+  if (catClean.includes("หวย") || catLower.includes("apb") || catLower.includes("lotto")) {
+    return {
+      thTarget: "หวย APB",
+      interTarget: "APB",
+      keywords: ["หวย APB", "หวย", "apb", "lotto"]
+    };
+  }
+  // UFA NEWS
+  if (catLower.includes("ufa") || catLower.includes("news")) {
+    return {
+      thTarget: "UFA NEWS",
+      interTarget: "UFA NEWS",
+      keywords: ["ufa news", "ufa", "news"]
+    };
+  }
+  // แคมเปญ
+  if (catClean.includes("แคมเปญ") || catLower.includes("campaign")) {
+    return {
+      thTarget: "แคมเปญ",
+      interTarget: "CAMPAIGN",
+      keywords: ["แคมเปญ", "campaign"]
+    };
+  }
+  // กิจกรรมกลาง
+  if (catClean.includes("กจกรรม") || catLower.includes("activity")) {
+    return {
+      thTarget: "กิจกรรมกลาง",
+      interTarget: "MAIN ACTIVITY",
+      keywords: ["กิจกรรมกลาง", "กิจกรรม", "activity"]
+    };
+  }
+  // กีฬาอื่นๆ
+  if (catClean.includes("กฬา") || catLower.includes("sport")) {
+    return {
+      thTarget: "กีฬาอื่นๆ Other Sports",
+      interTarget: "OTHER SPORTS",
+      keywords: ["กีฬาอื่นๆ", "กีฬา", "sport"]
+    };
+  }
+
+  return {
+    thTarget: CATEGORY_MAP_TH[cat] || cat || "ทั่วไป",
+    interTarget: CATEGORY_MAP_INTER[cat] || cat || "GENERAL",
+    keywords: [cat]
+  };
+}
+
+/**
+ * ดึงหรือสร้างโฟลเดอร์แบบ Fuzzy & Smart ตรวจจับคำผิด ช่องว่างเกิน หรือกรณีคนตั้งแค่เลข 1, 2, 3
+ */
+function getOrCreateFolderSmart(parentFolder, targetName, aliases, matchOptions) {
+  if (!parentFolder) return null;
+  const targetClean = normalizeStringFuzzy(targetName);
+  const targetNoDiacritics = stripThaiDiacritics(targetClean);
+
+  const cleanAliases = (aliases || []).map(a => normalizeStringFuzzy(a)).filter(Boolean);
   const subFolders = parentFolder.getFolders();
-  
-  // ตรวจสอบโฟลเดอร์ที่มีอยู่ก่อน
+  const folderList = [];
+
   while (subFolders.hasNext()) {
     const f = subFolders.next();
-    const fName = f.getName().trim().toLowerCase();
-    
-    if (fName === cleanTarget) {
-      return f;
+    const fName = f.getName();
+    folderList.push({
+      folder: f,
+      name: fName,
+      clean: normalizeStringFuzzy(fName),
+      noDiacritics: stripThaiDiacritics(normalizeStringFuzzy(fName)),
+    });
+  }
+
+  // Tier 1: ตรงเป๊ะ (ไม่สนตัวพิมพ์เล็ก-ใหญ่ และยุบช่องว่างเกิน)
+  for (let i = 0; i < folderList.length; i++) {
+    const item = folderList[i];
+    if (item.clean === targetClean) {
+      return item.folder;
     }
-    
-    // ตรวจสอบชื่อทางเลือก (aliases)
-    if (aliases && Array.isArray(aliases)) {
-      for (let a = 0; a < aliases.length; a++) {
-        if (fName === aliases[a].trim().toLowerCase()) {
-          return f;
+  }
+
+  // Tier 2: ตรงกับ Aliases ใดๆ
+  for (let i = 0; i < folderList.length; i++) {
+    const item = folderList[i];
+    if (cleanAliases.includes(item.clean)) {
+      return item.folder;
+    }
+  }
+
+  // Tier 3: ลบวรรณยุกต์ไทยออกแล้วตรงกัน (ตรวจจับคำพิมพ์ผิด เช่น สล๊อต vs สล็อต, คาสิโน่ vs คาสิโน)
+  for (let i = 0; i < folderList.length; i++) {
+    const item = folderList[i];
+    if (item.noDiacritics === targetNoDiacritics) {
+      return item.folder;
+    }
+    for (let a = 0; a < cleanAliases.length; a++) {
+      if (item.noDiacritics === stripThaiDiacritics(cleanAliases[a])) {
+        return item.folder;
+      }
+    }
+  }
+
+  // Tier 4: ตรวจจับกรณีคนตั้งแค่เลข 1, 2, 3 ตามลำดับงาน (Task Number Match)
+  if (matchOptions && matchOptions.taskNo !== undefined && matchOptions.taskNo !== null && matchOptions.taskNo !== "") {
+    const noStr = matchOptions.taskNo.toString().trim();
+    for (let i = 0; i < folderList.length; i++) {
+      const item = folderList[i];
+      // 4.1 ชื่อโฟลเดอร์ตรงกับเลขเพียวๆ เช่น "1", "2", "3"
+      if (item.clean === noStr) {
+        return item.folder;
+      }
+      // 4.2 ขึ้นต้นด้วยเลขงาน เช่น "1 (07.11)", "1 07.11", "1_...", "1-...", "1. ..."
+      const noRegex = new RegExp(`^0*${noStr}([\\s_\\(\\.\\-]|$)`, "i");
+      if (noRegex.test(item.clean)) {
+        return item.folder;
+      }
+    }
+  }
+
+  // Tier 5: ตรวจจับหมวดหมู่ที่มีคำหลักปรากฏ (Category Keyword Fuzzy Match)
+  if (matchOptions && matchOptions.isCategory && matchOptions.keywords && matchOptions.keywords.length > 0) {
+    for (let i = 0; i < folderList.length; i++) {
+      const item = folderList[i];
+      for (let k = 0; k < matchOptions.keywords.length; k++) {
+        const kw = normalizeStringFuzzy(matchOptions.keywords[k]);
+        if (kw && item.clean.includes(kw)) {
+          return item.folder;
         }
       }
     }
   }
 
-  // ถ้าไม่มี ให้สร้างใหม่ตาม targetName
+  // Tier 6: ตรวจจับโฟลเดอร์วันที่ (Date Folder Fuzzy Match)
+  if (matchOptions && matchOptions.isDate && matchOptions.dayNumber) {
+    const dNum = matchOptions.dayNumber.toString();
+    const padDNum = dNum.length === 1 ? "0" + dNum : dNum;
+    for (let i = 0; i < folderList.length; i++) {
+      const item = folderList[i];
+      const hasDay = item.clean.includes(dNum) || item.clean.includes(padDNum);
+      if (hasDay && matchOptions.monthKeywords) {
+        if (matchOptions.monthKeywords.some(mk => item.clean.includes(normalizeStringFuzzy(mk)))) {
+          return item.folder;
+        }
+      }
+    }
+  }
+
+  // Tier 7: ถ้าไม่พบโฟลเดอร์เดิมเลยจริงๆ จึงสร้างโฟลเดอร์ใหม่ตาม targetName
   return parentFolder.createFolder(targetName.trim());
+}
+
+// สำหรับ backward compatibility
+function getOrCreateFolderFlexible(parentFolder, targetName, aliases) {
+  return getOrCreateFolderSmart(parentFolder, targetName, aliases, {});
 }
 
 /**
@@ -1191,13 +1387,21 @@ function createFoldersAndSyncBatch(payload) {
     // 2. คำนวณชื่อโฟลเดอร์วันที่ตามมาตรฐาน (เช่น "07 พ.ย. 69" และ "NOV 07,2026")
     const dateInfo = parseDateFormats(sName);
 
-    const thDateAliases = [sName, `${dateInfo.dayNumber} พ.ย. 69`, `${dateInfo.padDay} พย 69`];
-    const thDateFolder = getOrCreateFolderFlexible(thFolder, dateInfo.thFolderName, thDateAliases);
+    const thDateAliases = [sName, `${dateInfo.dayNumber} พ.ย. 69`, `${dateInfo.padDay} พย 69`, `${dateInfo.dayNumber} พย 69`];
+    const thDateFolder = getOrCreateFolderSmart(thFolder, dateInfo.thFolderName, thDateAliases, {
+      isDate: true,
+      dayNumber: dateInfo.dayNumber,
+      monthKeywords: [dateInfo.thMonth, "พย", "พ.ย."]
+    });
 
     let interDateFolder = null;
     if (interFolder) {
-      const interAliases = [`NOV ${dateInfo.dayNumber},2026`, `${dateInfo.padDay} NOV 2026`];
-      interDateFolder = getOrCreateFolderFlexible(interFolder, dateInfo.interFolderName, interAliases);
+      const interAliases = [`NOV ${dateInfo.dayNumber},2026`, `${dateInfo.padDay} NOV 2026`, `${dateInfo.dayNumber} NOV 2026`];
+      interDateFolder = getOrCreateFolderSmart(interFolder, dateInfo.interFolderName, interAliases, {
+        isDate: true,
+        dayNumber: dateInfo.dayNumber,
+        monthKeywords: [dateInfo.interMonth, dateInfo.padMonth]
+      });
     }
 
     const sheetTasks = grouped[sName];
@@ -1206,25 +1410,37 @@ function createFoldersAndSyncBatch(payload) {
     for (let t = 0; t < sheetTasks.length; t++) {
       const task = sheetTasks[t];
       const rawCategory = task.category || "ทั่วไป";
-      const taskName = task.taskName || `${task.no || 1}_${rawCategory}`;
+      const catInfo = getCategoryInfoSmart(rawCategory);
+      const taskName = task.taskName || `${task.no || 1}_${catInfo.thTarget}`;
       const row = task.row;
 
-      // 3. หมวดหมู่ฝั่ง TH
-      const thCatTargetName = CATEGORY_MAP_TH[rawCategory] || rawCategory;
-      const thCatFolder = getOrCreateFolderFlexible(thDateFolder, thCatTargetName, [rawCategory]);
+      // 3. หมวดหมู่ฝั่ง TH (ตรวจจับคำผิด เช่น สล๊อต vs สล็อต, คาสิโน่ vs คาสิโน)
+      const thCatFolder = getOrCreateFolderSmart(thDateFolder, catInfo.thTarget, [rawCategory, catInfo.interTarget], {
+        isCategory: true,
+        keywords: catInfo.keywords
+      });
 
-      // 4. หมวดหมู่ฝั่ง INTER
+      // 4. หมวดหมู่ฝั่ง INTER (ตรวจจับชื่อย่อหรือชื่อภาษาไทยที่คนก๊อปปี้ไปวาง)
       let interCatFolder = null;
       if (interDateFolder) {
-        const interCatTargetName = CATEGORY_MAP_INTER[rawCategory] || rawCategory;
-        interCatFolder = getOrCreateFolderFlexible(interDateFolder, interCatTargetName, [rawCategory]);
+        interCatFolder = getOrCreateFolderSmart(interDateFolder, catInfo.interTarget, [catInfo.thTarget, rawCategory], {
+          isCategory: true,
+          keywords: catInfo.keywords
+        });
       }
 
       // 5. โฟลเดอร์งานฝั่ง TH
-      const thTaskFolder = getOrCreateFolderFlexible(thCatFolder, taskName, []);
+      const thAliases = [
+        `${task.no || 1}`,
+        `${task.no || 1}_${catInfo.thTarget}`,
+        `${task.no || 1} ${catInfo.thTarget}`,
+      ];
+      const thTaskFolder = getOrCreateFolderSmart(thCatFolder, taskName, thAliases, {
+        taskNo: task.no
+      });
       const thUrl = thTaskFolder.getUrl();
 
-      // 6. โฟลเดอร์งานฝั่ง INTER
+      // 6. โฟลเดอร์งานฝั่ง INTER (ตรวจจับกรณีคนตั้งแค่เลข 1, 2, 3 หรือมีวันที่กำกับ)
       let interUrl = "";
       if (interCatFolder) {
         const interTaskName = `${task.no || 1} (${dateInfo.interDateSuffix})`;
@@ -1233,8 +1449,11 @@ function createFoldersAndSyncBatch(payload) {
           `${task.no || 1} ${dateInfo.dayNumber}.${parseInt(dateInfo.padMonth, 10)}`,
           `${task.no || 1} ${dateInfo.interDateSuffix}`,
           `${task.no || 1} (${dateInfo.dayNumber}.${parseInt(dateInfo.padMonth, 10)})`,
+          `${task.no || 1} (${parseInt(dateInfo.dayNumber, 10)}.${parseInt(dateInfo.padMonth, 10)})`,
         ];
-        const interTaskFolder = getOrCreateFolderFlexible(interCatFolder, interTaskName, interAliases);
+        const interTaskFolder = getOrCreateFolderSmart(interCatFolder, interTaskName, interAliases, {
+          taskNo: task.no
+        });
         interUrl = interTaskFolder.getUrl();
       }
 
