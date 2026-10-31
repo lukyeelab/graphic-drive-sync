@@ -603,28 +603,30 @@ export default function HomePage() {
       selectedTaskKeys.includes(getTaskKey(t.sheetName, t.row))
     );
 
-    for (const t of selectedTasks) {
-      const key = getTaskKey(t.sheetName, t.row);
-      const name = (taskNamesMap[key] || t.taskName || "").trim();
-      if (!name) {
-        alert(
-          `กรุณากรอก "ชื่องาน/ชื่อโฟลเดอร์" สำหรับงานแถว #${t.row} (หมวด ${t.category} งานที่ ${t.no}) ก่อนกดสร้างโฟลเดอร์ครับ`
-        );
-        return;
-      }
-    }
-
+    // เตรียมข้อมูลงานที่จะส่งไปสร้าง/เชื่อมโยงโฟลเดอร์
+    // หากช่องชื่องานว่างอยู่ จะใช้ชื่อเริ่มต้นตามลำดับงานและหมวดหมู่โดยอัตโนมัติ (เช่น 5_กีฬาอื่นๆ) เพื่อความสะดวก
+    const updatedNames: Record<string, string> = {};
     const tasksToSync = selectedTasks.map((t) => {
       const key = getTaskKey(t.sheetName, t.row);
+      const inputName = (taskNamesMap[key] || t.taskName || "").trim();
+      const defaultName = `${t.no || 1}_${t.category || "ทั่วไป"}`;
+      const finalName = inputName || defaultName;
+      if (!inputName) {
+        updatedNames[key] = finalName;
+      }
       return {
         sheetName: t.sheetName,
         row: t.row,
         category: t.category,
         no: t.no,
-        taskName: (taskNamesMap[key] || t.taskName || "").trim(),
+        taskName: finalName,
         existingUrl: t.uploadUrl || folderLinksMap[key]?.thUrl || "",
       };
     });
+
+    if (Object.keys(updatedNames).length > 0) {
+      setTaskNamesMap((prev) => ({ ...prev, ...updatedNames }));
+    }
 
     const keysToSync = selectedTasks.map((t) => getTaskKey(t.sheetName, t.row));
     setSyncingTaskKeys(keysToSync);
