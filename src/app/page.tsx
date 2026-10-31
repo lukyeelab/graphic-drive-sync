@@ -126,7 +126,7 @@ export default function HomePage() {
   };
 
   // โหลดรายการงานตามชื่อพนักงาน
-  const fetchTasks = async (targetAssignee = assignee, targetSheet = sheetName, isPending = pendingOnly) => {
+  const fetchTasks = async (targetAssignee = assignee, targetSheet = sheetName) => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -138,19 +138,26 @@ export default function HomePage() {
     setSyncResult(null);
 
     const timeoutId = setTimeout(() => {
-      controller.abort();
-      setIsLoading(false);
-      setErrorMessage("การเชื่อมต่อใช้เวลานาน กรุณากด 'ค้นหางานของฉัน' อีกครั้ง");
+      if (abortControllerRef.current === controller) {
+        controller.abort();
+        setIsLoading(false);
+        setErrorMessage("การเชื่อมต่อใช้เวลานาน กรุณากด 'ค้นหางานของฉัน' อีกครั้ง");
+      }
     }, 120000);
 
     try {
+      // ดึงงานทั้งหมดของพนักงานคนนี้ (pendingOnly=false) เพื่อให้ได้ข้อมูลครบทั้งงานเสร็จและไม่เสร็จ
+      // ทำให้สลับติ๊ก 'แสดงเฉพาะงานที่ยังไม่เสร็จ' ได้ทันทีใน 0 ms และนับสถิติได้ถูกต้อง 100%
       const res = await fetch(
         `/api/tasks?action=getTasks&sheet=${encodeURIComponent(targetSheet)}&assignee=${encodeURIComponent(
           targetAssignee
-        )}&pendingOnly=${isPending ? "true" : "false"}`,
+        )}&pendingOnly=false`,
         { signal: controller.signal }
       );
       clearTimeout(timeoutId);
+
+      // ถ้ามี request ใหม่ถูกส่งออกไปแล้วระหว่างรอ ให้ข้ามผลลัพธ์ของ request เก่านี้ไป
+      if (abortControllerRef.current !== controller) return;
 
       const data = await res.json();
       if (data.success) {
@@ -209,7 +216,10 @@ export default function HomePage() {
       }
     } finally {
       clearTimeout(timeoutId);
-      setIsLoading(false);
+      // ปิด isLoading เฉพาะเมื่อเป็น controller ล่าสุดเท่านั้น เพื่อป้องกัน race condition
+      if (abortControllerRef.current === controller) {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -227,14 +237,14 @@ export default function HomePage() {
     const initialName = savedName || "ลูกหยี";
     if (savedName) setAssignee(savedName);
 
-    fetchTasks(initialName, "7 พย", pendingOnly);
+    fetchTasks(initialName, "7 พย");
     loadMetadata();
   }, []);
 
   const handleAssigneeChange = (newName: string) => {
     setAssignee(newName);
     localStorage.setItem("gds_assignee", newName);
-    fetchTasks(newName, sheetName, pendingOnly);
+    fetchTasks(newName, sheetName);
   };
 
   const toggleSelectTask = (key: string) => {
@@ -322,7 +332,7 @@ export default function HomePage() {
           });
         }
 
-        fetchTasks(assignee, sheetName, pendingOnly);
+        fetchTasks(assignee, sheetName);
       } else {
         alert(result.error || result.message || "เกิดข้อผิดพลาดในการสร้างโฟลเดอร์");
       }
@@ -335,6 +345,9 @@ export default function HomePage() {
   };
 
   const filteredTasks = tasks.filter((t) => {
+    if (pendingOnly && t.isCompleted) {
+      return false;
+    }
     const matchSearch =
       searchTerm === "" ||
       t.taskName.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -453,7 +466,7 @@ export default function HomePage() {
                 value={sheetName}
                 onChange={(e) => {
                   setSheetName(e.target.value);
-                  fetchTasks(assignee, e.target.value, pendingOnly);
+                  fetchTasks(assignee, e.target.value);
                 }}
                 className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-medium"
               >
@@ -482,9 +495,9 @@ export default function HomePage() {
 
             <div className="flex gap-2">
               <button
-                onClick={() => fetchTasks(assignee, sheetName, pendingOnly)}
+                onClick={() => fetchTasks(assignee, sheetName)}
                 disabled={isLoading}
-                className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] rounded-xl shadow-xs transition-all disabled:opacity-60"
+                className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] rounded-xl shadow-xs transition-all disabled:opacity-60 cursor-pointer"
               >
                 <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
                 <span>{isLoading ? "กำลังค้นหา..." : "ค้นหางานของฉัน"}</span>
@@ -497,11 +510,8 @@ export default function HomePage() {
               <input
                 type="checkbox"
                 checked={pendingOnly}
-                onChange={(e) => {
-                  setPendingOnly(e.target.checked);
-                  fetchTasks(assignee, sheetName, e.target.checked);
-                }}
-                className="w-4 h-4 text-indigo-600 rounded-sm focus:ring-indigo-500"
+                onChange={(e) => setPendingOnly(e.target.checked)}
+                className="w-4 h-4 text-indigo-600 rounded-sm focus:ring-indigo-500 cursor-pointer"
               />
               <span>แสดงเฉพาะงานที่ <b>&quot;ยังไม่ได้อัปงาน (ยังไม่เสร็จสิ้น)&quot;</b></span>
             </label>
@@ -648,16 +658,57 @@ export default function HomePage() {
         )}
 
         {/* Task List Grouped by Date */}
-        {Object.keys(groupedTasksByDate).length === 0 ? (
-          <section className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-400">
-            <AlertCircle className="w-10 h-10 mx-auto mb-2 text-slate-300" />
-            <p className="font-semibold text-slate-700 text-base">
-              {isLoading ? "กำลังค้นหางานจาก Google Sheets..." : "ไม่พบงานค้างที่ยังไม่ได้อัป"}
-            </p>
-            <p className="text-xs text-slate-400 mt-1">
-              ลองเลือกวันที่ เช่น <b>7 พย</b> หรือตรวจสอบชื่อผู้รับงาน
-            </p>
+        {isLoading ? (
+          <section className="bg-white rounded-2xl border border-slate-200 p-12 text-center shadow-xs">
+            <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto mb-3 shadow-inner">
+              <RefreshCw className="w-6 h-6 animate-spin" />
+            </div>
+            <h4 className="text-base font-bold text-slate-800">กำลังค้นหางานจาก Google Sheets...</h4>
+            <p className="text-xs text-slate-400 mt-1">กรุณารอสักครู่ ระบบกำลังดึงข้อมูลล่าสุด</p>
           </section>
+        ) : Object.keys(groupedTasksByDate).length === 0 ? (
+          pendingOnly && tasks.length > 0 && pendingTasks === 0 ? (
+            <section className="bg-emerald-50/80 border border-emerald-200 rounded-2xl p-8 text-center shadow-xs">
+              <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-3 shadow-2xs">
+                <CheckCircle2 className="w-6 h-6" />
+              </div>
+              <h4 className="text-base font-extrabold text-emerald-900">
+                ยอดเยี่ยมมาก! งานทั้งหมดของ &quot;{assignee}&quot; ในวันที่ {sheetName} เสร็จสิ้นครบแล้ว 🎉
+              </h4>
+              <p className="text-xs text-emerald-700 mt-1.5 max-w-md mx-auto leading-relaxed">
+                คุณได้สร้างโฟลเดอร์และอัปงานครบแล้วทั้ง <b>{completedTasks}</b> รายการ ไม่มีงานที่ยังค้างอยู่
+              </p>
+              <div className="mt-4 flex items-center justify-center gap-2">
+                <button
+                  onClick={() => setPendingOnly(false)}
+                  className="px-4 py-2 bg-white text-emerald-700 hover:text-emerald-800 border border-emerald-300 hover:bg-emerald-50 text-xs font-bold rounded-xl shadow-xs transition-all inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <FolderCheck className="w-4 h-4 text-emerald-600" />
+                  <span>คลิกดูรายการงานที่อัปเสร็จแล้ว ({completedTasks} งาน)</span>
+                </button>
+              </div>
+            </section>
+          ) : (
+            <section className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-400 shadow-xs">
+              <AlertCircle className="w-10 h-10 mx-auto mb-2 text-slate-300" />
+              <h4 className="font-bold text-slate-700 text-base">
+                ไม่พบงานที่มอบหมายให้ &quot;{assignee}&quot; ในแผ่นงาน {sheetName}
+              </h4>
+              <p className="text-xs text-slate-400 mt-1">
+                ลองตรวจสอบชื่อผู้รับงาน หรือเลือก <b>&quot;🔍 ทุกวันที่ (ค้นหางานค้างข้ามแท็บ)&quot;</b> เพื่อค้นหา
+              </p>
+              <button
+                onClick={() => {
+                  setSheetName("ALL");
+                  fetchTasks(assignee, "ALL");
+                }}
+                className="mt-4 px-3.5 py-1.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 text-xs font-semibold rounded-xl transition-all inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Search className="w-3.5 h-3.5" />
+                <span>ค้นหางานข้ามทุกวันที่ (ALL)</span>
+              </button>
+            </section>
+          )
         ) : (
           Object.keys(groupedTasksByDate).map((dateSheet) => {
             const dateTasks = groupedTasksByDate[dateSheet];
