@@ -903,7 +903,8 @@ export default function HomePage() {
       searchTerm === "" ||
       (t.taskName || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
       (t.category || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (t.sheetName || "").toLowerCase().includes(searchTerm.toLowerCase());
+      (t.sheetName || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (t.assignDate || "").toLowerCase().includes(searchTerm.toLowerCase());
     return matchSearch;
   });
 
@@ -1615,6 +1616,7 @@ const renderDateCheckbox = (s: string) => {
                         <th className="py-3.5 px-4 w-44 text-[#3D372E]">ใบบรีฟ</th>
                         <th className="py-3.5 px-3 w-16 text-center text-[#3D372E]">No.</th>
                         <th className="py-3.5 px-4 text-[#3D372E]">ชื่องาน/ชื่อโฟลเดอร์ (สำหรับสร้างโฟลเดอร์ TH)</th>
+                        <th className="py-3.5 px-3 text-center min-w-[110px] w-28 whitespace-nowrap text-[#3D372E]">วันที่จ่ายงาน</th>
                         <th className="py-3.5 px-3 text-center min-w-[110px] w-28 whitespace-nowrap text-[#3D372E]">สถานะ</th>
                         <th className="py-3.5 px-3 text-center min-w-[210px] w-56 text-[#3D372E]">ลิงก์โฟลเดอร์ (TH & INTER)</th>
                       </tr>
@@ -1737,6 +1739,23 @@ const renderDateCheckbox = (s: string) => {
                                       </div>
                                     )}
                                   </div>
+                                );
+                              })()}
+                            </td>
+                            <td className="py-3.5 px-3 text-center whitespace-nowrap">
+                              {(() => {
+                                const rawDate = task.assignDate ? String(task.assignDate).trim() : "";
+                                if (!rawDate || rawDate === "-") {
+                                  return <span className="text-xs text-[#C5BDB1]">-</span>;
+                                }
+                                return (
+                                  <span
+                                    className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-mono font-medium text-[#443E35] bg-[#F4EFE6] border border-[#DDD5C7] shadow-2xs"
+                                    title={`วันที่จ่ายงาน (Col K): ${rawDate}`}
+                                  >
+                                    <Calendar className="w-3 h-3 text-[#A87B43] shrink-0" />
+                                    <span>{rawDate}</span>
+                                  </span>
                                 );
                               })()}
                             </td>
