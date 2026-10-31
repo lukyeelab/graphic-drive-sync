@@ -1339,9 +1339,9 @@ function writeSmartChipsBatchToSheet(spreadsheetId, sheet, updates) {
     const u = updates[i];
     const rowIndex = u.row - 1; // 0-based index สำหรับ Sheets API v4
 
-    // 1. เขียน Smart Chip (chipRuns) + Note (ลิงก์ INTER) ลงในช่อง Col F (index 5)
+    // 1. เขียน Smart Chip แท้ๆ (chipRuns) โดยใช้ตัวยึด '@' ตามมาตรฐาน Google Sheets API
     const cellDataF = {
-      userEnteredValue: { stringValue: u.taskName },
+      userEnteredValue: { stringValue: "@" },
       chipRuns: [
         {
           startIndex: 0,
@@ -1508,18 +1508,49 @@ function createFoldersAndSyncBatch(payload) {
         });
       }
 
-      // 5. โฟลเดอร์งานฝั่ง TH
-      const thAliases = [
-        `${task.no || 1}`,
-        `${task.no || 1}_${catInfo.thTarget}`,
-        `${task.no || 1} ${catInfo.thTarget}`,
-      ];
-      const thTaskFolder = getOrCreateFolderSmart(thCatFolder, taskName, thAliases, {
-        taskNo: task.no
-      });
+      // 5. โฟลเดอร์งานฝั่ง TH: ตรวจสอบว่ามีโฟลเดอร์เดิมอยู่แล้วหรือไม่ (เพื่อเปลี่ยนชื่อแทนการสร้างใหม่ซ้ำซ้อน)
+      let thTaskFolder = null;
+      let existingThFolderId = null;
+
+      if (task.existingUrl) {
+        existingThFolderId = extractFolderId(task.existingUrl);
+      }
+      if (!existingThFolderId) {
+        const currentCell = sheet.getRange(row, CONFIG.COL_UPLOAD_LINK);
+        existingThFolderId = extractDriveFolderFromCell(currentCell);
+      }
+
+      if (existingThFolderId) {
+        try {
+          const existingF = DriveApp.getFolderById(existingThFolderId);
+          if (existingF && !existingF.isTrashed()) {
+            thTaskFolder = existingF;
+            // ถ้าชื่อโฟลเดอร์เดิมไม่ตรงกับชื่องานใหม่ ให้เปลี่ยนชื่อโฟลเดอร์เดิมทันที (ไม่สร้างโฟลเดอร์ใหม่ซ้ำ!)
+            if (thTaskFolder.getName() !== taskName.trim()) {
+              thTaskFolder.setName(taskName.trim());
+            }
+          }
+        } catch (e) {
+          Logger.log("Error renaming existing TH folder: " + e.message);
+        }
+      }
+
+      if (!thTaskFolder) {
+        const thAliases = [
+          `${task.no || 1}`,
+          `${task.no || 1}_${catInfo.thTarget}`,
+          `${task.no || 1} ${catInfo.thTarget}`,
+        ];
+        thTaskFolder = getOrCreateFolderSmart(thCatFolder, taskName, thAliases, {
+          taskNo: task.no
+        });
+        if (thTaskFolder && thTaskFolder.getName() !== taskName.trim()) {
+          try { thTaskFolder.setName(taskName.trim()); } catch (e) {}
+        }
+      }
       const thUrl = thTaskFolder.getUrl();
 
-      // 6. โฟลเดอร์งานฝั่ง INTER (ตรวจจับกรณีคนตั้งแค่เลข 1, 2, 3 หรือมีวันที่กำกับ)
+      // 6. โฟลเดอร์งานฝั่ง INTER: ตรวจสอบและเปลี่ยนชื่อโฟลเดอร์เดิมหากมีอยู่แล้ว
       let interUrl = "";
       if (interCatFolder) {
         const interTaskName = `${task.no || 1} (${dateInfo.interDateSuffix})`;
@@ -1530,9 +1561,34 @@ function createFoldersAndSyncBatch(payload) {
           `${task.no || 1} (${dateInfo.dayNumber}.${parseInt(dateInfo.padMonth, 10)})`,
           `${task.no || 1} (${parseInt(dateInfo.dayNumber, 10)}.${parseInt(dateInfo.padMonth, 10)})`,
         ];
-        const interTaskFolder = getOrCreateFolderSmart(interCatFolder, interTaskName, interAliases, {
-          taskNo: task.no
-        });
+
+        let interTaskFolder = null;
+        const currentCell = sheet.getRange(row, CONFIG.COL_UPLOAD_LINK);
+        const cellNote = currentCell.getNote() || "";
+        const noteMatch = cellNote.match(/INTER:\s*(https:\/\/[^\s]+)/i);
+        if (noteMatch && noteMatch[1]) {
+          const existingInterId = extractFolderId(noteMatch[1]);
+          if (existingInterId) {
+            try {
+              const existingInterF = DriveApp.getFolderById(existingInterId);
+              if (existingInterF && !existingInterF.isTrashed()) {
+                interTaskFolder = existingInterF;
+                if (interTaskFolder.getName() !== interTaskName.trim()) {
+                  interTaskFolder.setName(interTaskName.trim());
+                }
+              }
+            } catch (e) {}
+          }
+        }
+
+        if (!interTaskFolder) {
+          interTaskFolder = getOrCreateFolderSmart(interCatFolder, interTaskName, interAliases, {
+            taskNo: task.no
+          });
+          if (interTaskFolder && interTaskFolder.getName() !== interTaskName.trim()) {
+            try { interTaskFolder.setName(interTaskName.trim()); } catch (e) {}
+          }
+        }
         interUrl = interTaskFolder.getUrl();
       }
 

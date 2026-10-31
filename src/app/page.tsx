@@ -436,6 +436,7 @@ export default function HomePage() {
         category: t.category,
         no: t.no,
         taskName: taskNamesMap[key].trim(),
+        existingUrl: t.uploadUrl || folderLinksMap[key]?.thUrl || "",
       };
     });
 
