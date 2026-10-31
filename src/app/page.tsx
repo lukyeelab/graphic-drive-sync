@@ -1547,7 +1547,7 @@ export default function HomePage() {
             <h4 className="text-base font-semibold text-[#1C1C1E]">กำลังค้นหางานจาก Google Sheets...</h4>
             <p className="text-xs text-[#8E8E93] mt-1">
               {streamingProgress
-                ? `กำลังตรวจสอบ ${streamingProgress.activeSheet ? `"${streamingProgress.activeSheet}"` : ""} (ตรวจสอบแล้ว ${streamingProgress.current} จากทั้งหมด ${streamingProgress.total} วัน)`
+                ? `กำลังตรวจสอบ ${streamingProgress.activeSheet ? `"${streamingProgress.activeSheet}"` : ""} (ข้อมูล ${streamingProgress.current}/${streamingProgress.total} วัน)`
                 : "กรุณารอสักครู่ ระบบกำลังดึงข้อมูลล่าสุด"}
             </p>
           </section>
@@ -1646,7 +1646,7 @@ export default function HomePage() {
                     <p className="text-xs font-semibold text-[#1C1C1E] flex items-center gap-1.5 flex-wrap">
                       <span>กำลังทยอยดึงข้อมูลจาก Google Sheets...</span>
                       <span className="bg-[#007AFF]/15 text-[#007AFF] text-[11px] font-bold px-2.5 py-0.5 rounded-full border border-[#007AFF]/20">
-                        แสดงแล้ว {streamingProgress.current} จากทั้งหมด {streamingProgress.total} วัน
+                        ข้อมูล {streamingProgress.current}/{streamingProgress.total} วัน
                       </span>
                     </p>
                     {streamingProgress.activeSheet && (
