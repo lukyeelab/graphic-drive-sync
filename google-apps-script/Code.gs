@@ -1418,10 +1418,19 @@ function writeSmartChipsBatchToSheet(spreadsheetId, sheet, updates) {
       const u = updates[i];
       try {
         const cellF = sheet.getRange(u.row, CONFIG.COL_UPLOAD_LINK);
+
+        // กำหนดรูปแบบตัวหนังสือ: ไม่ใส่เส้นใต้ และใช้สีดำเดิมตามเซลล์
+        const textStyle = SpreadsheetApp.newTextStyle()
+          .setUnderline(false)
+          .setForegroundColor("#000000")
+          .build();
+
         const richValue = SpreadsheetApp.newRichTextValue()
           .setText(u.taskName)
           .setLinkUrl(u.thUrl)
+          .setTextStyle(textStyle)
           .build();
+
         cellF.setRichTextValue(richValue);
       } catch (eRich) {
         Logger.log(`ตั้งค่า RichText แถว ${u.row} ไม่สำเร็จ: ${eRich.message}`);
@@ -1429,13 +1438,20 @@ function writeSmartChipsBatchToSheet(spreadsheetId, sheet, updates) {
     }
   }
 
-  // ขั้นตอนที่ 3: ตั้งค่า Note สำหรับ INTER Link และเปลี่ยนสถานะ Col L เป็น "เสร็จสิ้น" แยกออกมาต่างหาก
-  // ป้องกันไม่ให้ Data Validation หรือ Note ขัดขวางการสร้าง Smart Chip
+  // ขั้นตอนที่ 3: ปรับรูปแบบเซลล์ไม่ให้มีเส้นใต้, สีตัวหนังสือดำ, ตั้งค่า Note และเปลี่ยนสถานะ Col L
   for (let i = 0; i < updates.length; i++) {
     const u = updates[i];
+    const cellF = sheet.getRange(u.row, CONFIG.COL_UPLOAD_LINK);
+
+    // บังคับรูปแบบเซลล์: ไม่ใส่เส้นใต้ และใช้สีตัวหนังสือสีดำ/สีเดิมตามเซลล์
+    try {
+      cellF.setFontLine("none");
+      cellF.setFontColor("#000000");
+    } catch (eFmt) {}
+
     if (u.interUrl) {
       try {
-        sheet.getRange(u.row, CONFIG.COL_UPLOAD_LINK).setNote(`INTER: ${u.interUrl}`);
+        cellF.setNote(`INTER: ${u.interUrl}`);
       } catch (eNote) {
         Logger.log(`ตั้งค่า Note แถว ${u.row} ไม่สำเร็จ: ${eNote.message}`);
       }
@@ -1443,13 +1459,9 @@ function writeSmartChipsBatchToSheet(spreadsheetId, sheet, updates) {
 
     const cellL = sheet.getRange(u.row, CONFIG.COL_STATUS);
     try {
-      cellL.setValue("เสร็จสิ้น ✅");
+      cellL.setValue("เสร็จสิ้น");
     } catch (e1) {
-      try {
-        cellL.setValue("เสร็จสิ้น");
-      } catch (e2) {
-        Logger.log(`ตั้งค่าสถานะแถว ${u.row} ไม่สำเร็จ: ${e2.message}`);
-      }
+      Logger.log(`ตั้งค่าสถานะแถว ${u.row} ไม่สำเร็จ: ${e1.message}`);
     }
   }
 
@@ -1577,6 +1589,7 @@ function createFoldersAndSyncBatch(payload) {
   }
 
   const results = [];
+  let lastBatchResult = null;
 
   for (const sName in grouped) {
     const sheet = ss.getSheetByName(sName);
@@ -1727,12 +1740,12 @@ function createFoldersAndSyncBatch(payload) {
         taskName: taskName,
         thFolderUrl: thUrl,
         interFolderUrl: interUrl,
-        status: "เสร็จสิ้น ✅",
+        status: "เสร็จสิ้น",
       });
     }
 
     // 7. เขียน Smart Chip + Note + เปลี่ยนสถานะลงชีตแบบ Batch รวดเดียว
-    const batchResult = writeSmartChipsBatchToSheet(ssId, sheet, sheetUpdates);
+    lastBatchResult = writeSmartChipsBatchToSheet(ssId, sheet, sheetUpdates);
 
     // 8. ล้าง Cache ของแผ่นงานนี้เพื่อให้ข้อมูลใหม่พร้อมใช้งาน
     try {
@@ -1743,9 +1756,9 @@ function createFoldersAndSyncBatch(payload) {
 
   return {
     success: true,
-    smartChipResult: batchResult,
-    message: batchResult && !batchResult.success
-      ? `สร้างโฟลเดอร์สำเร็จ แต่วางชิปไม่สำเร็จ: ${batchResult.error}`
+    smartChipResult: lastBatchResult,
+    message: lastBatchResult && !lastBatchResult.success
+      ? `สร้างโฟลเดอร์สำเร็จ แต่วางชิปไม่สำเร็จ: ${lastBatchResult.error}`
       : `สร้างโฟลเดอร์ TH & INTER และวาง Smart Chip สำเร็จ ${results.length} รายการ`,
     updatedTasks: results,
   };
