@@ -281,8 +281,9 @@ function findDriveFileOrFolderUrl(title) {
 
 /**
  * แปลงลิงก์จาก Google Drive ทั่วไป หรือ Smart Chip ให้เป็นลิงก์เปิดหน้า Google Slides Presentation โดยตรง
+ * เพิ่ม allowDriveSearch เพื่อป้องกันไม่ให้ค้นหา Drive นานเกินไปจนหน้าเว็บ Timeout
  */
-function normalizeToPresentationUrl(rawUrl, briefTitle, scriptCache, memoryBriefCache) {
+function normalizeToPresentationUrl(rawUrl, briefTitle, scriptCache, memoryBriefCache, allowDriveSearch) {
   let url = (rawUrl || "").toString().trim();
 
   // 1. ถ้าเป็นลิงก์ Google Slides อยู่แล้ว คืนค่าเดิมทันที
@@ -291,7 +292,7 @@ function normalizeToPresentationUrl(rawUrl, briefTitle, scriptCache, memoryBrief
   }
 
   // 2. ถ้าเป็นลิงก์ไฟล์ใน Google Drive (เช่น drive.google.com/file/d/ID หรือ drive.google.com/open?id=ID)
-  // และไม่ใช่ลิงก์โฟลเดอร์ (/folders/) ให้ดึง ID มาแปลงเป็นลิงก์ Presentation ทันที (ไม่ต้องยิง API ค้นหา)
+  // และไม่ใช่ลิงก์โฟลเดอร์ (/folders/) ให้ดึง ID มาแปลงเป็นลิงก์ Presentation ทันที (ไม่ต้องยิง API ค้นหา, ใช้เวลา 0ms)
   if (url && !url.includes("/folders/")) {
     const dMatch = url.match(/\/d\/([-\w]{25,})/i);
     const idMatch = url.match(/[?&]id=([-\w]{25,})/i);
@@ -301,26 +302,31 @@ function normalizeToPresentationUrl(rawUrl, briefTitle, scriptCache, memoryBrief
     }
   }
 
-  // 3. ถ้าไม่มีลิงก์ หรือลิงก์ในช่องเผลอเป็นลิงก์โฟลเดอร์ (/folders/) ให้ค้นหาไฟล์ Google Slides จากชื่อใบบรีฟแทน (ผ่าน Cache)
+  // 3. ถ้าไม่มีลิงก์ หรือลิงก์ในช่องเผลอเป็นลิงก์โฟลเดอร์ (/folders/) ให้เช็คจาก Cache ก่อนเสมอ
   if (briefTitle) {
     const cacheKey = "SLIDE_URL_V2_" + Utilities.base64EncodeWebSafe(briefTitle).slice(0, 60);
     if (memoryBriefCache && memoryBriefCache[briefTitle] !== undefined) {
       return memoryBriefCache[briefTitle] || url;
     }
     const cachedUrl = scriptCache ? scriptCache.get(cacheKey) : null;
-    if (cachedUrl !== null && cachedUrl !== "") {
+    if (cachedUrl !== null) {
       if (memoryBriefCache) memoryBriefCache[briefTitle] = cachedUrl;
-      return cachedUrl;
+      return cachedUrl || url;
     }
-    const foundSlideUrl = findDriveFileOrFolderUrl(briefTitle);
-    const finalUrl = foundSlideUrl || url;
-    if (memoryBriefCache) memoryBriefCache[briefTitle] = finalUrl;
-    try {
-      if (finalUrl && scriptCache) {
-        scriptCache.put(cacheKey, finalUrl, 21600); // แคชไว้นาน 6 ชั่วโมง
-      }
-    } catch (e) {}
-    return finalUrl;
+
+    // ค้นหาใน Drive เฉพาะเมื่อยังมีเวลาเหลือ (Time-Guard: ไม่ทำให้หน้าบ้าน Timeout)
+    if (allowDriveSearch) {
+      const foundSlideUrl = findDriveFileOrFolderUrl(briefTitle);
+      const finalUrl = foundSlideUrl || url;
+      if (memoryBriefCache) memoryBriefCache[briefTitle] = finalUrl;
+      try {
+        // แคชผลลัพธ์ไว้ 6 ชั่วโมง (แม้หาไม่เจอก็แคชค่าว่างไว้ เพื่อไม่ให้ค้นหาซ้ำอีก)
+        if (scriptCache) {
+          scriptCache.put(cacheKey, finalUrl || "", 21600);
+        }
+      } catch (e) {}
+      return finalUrl;
+    }
   }
 
   return url;
@@ -658,8 +664,10 @@ function getInitialMetadata() {
 function fetchSheetsGridDataFast(spreadsheetId, sheetNames) {
   try {
     const token = ScriptApp.getOAuthToken();
+    // ถ้าดึงแผ่นงานเดียวใช้ 350 แถว ถ้าดึงหลายแผ่นงานพร้อมกัน (ALL) ใช้ 180 แถวเพื่อความเร็วสูงสุด
+    const maxRow = sheetNames.length === 1 ? 350 : 180;
     const rangesParam = sheetNames
-      .map(name => `ranges=${encodeURIComponent(`'${name}'!A1:N120`)}`)
+      .map(name => `ranges=${encodeURIComponent(`'${name}'!A1:N${maxRow}`)}`)
       .join("&");
     const fields = "sheets(properties(title),data(rowData(values(formattedValue,hyperlink,note,textFormatRuns(format(link(uri))),chipRuns(chip(richLinkProperties(uri)))))))";
     const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?${rangesParam}&fields=${encodeURI(fields)}`;
@@ -751,9 +759,10 @@ function extractApiCellInfo(cellObj) {
 }
 
 /**
- * ดึงรายการงานตามชื่อพนักงาน (Ultra-Fast Version: ใช้ Sheets API Batch + CacheService)
+ * ดึงรายการงานตามชื่อพนักงาน (Ultra-Fast Version: ใช้ Sheets API Batch + CacheService + Time-Guard)
  */
 function getStaffTasks(assignee, targetSheet, pendingOnly) {
+  const startTime = Date.now();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const ssId = ss.getId();
   const allSheets = ss.getSheets();
@@ -767,9 +776,11 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
       return { success: false, error: `ไม่พบแผ่นงานชื่อ: ${targetSheet}` };
     }
   } else {
-    // กรณี ALL เรียงลำดับแท็บวันที่ล่าสุดก่อน แล้วดึง 6 วันล่าสุด
+    // กรณี ALL เรียงลำดับแท็บวันที่ล่าสุดก่อนเสมอ
     const sortedSheets = sortSheetNamesDesc(allSheetNames);
-    targetSheetNames = sortedSheets.slice(0, 6);
+    // ถ้าระบุชื่อพนักงานค้นหา 10 แผ่นงานล่าสุด ถ้าดูของทุกคน (ALL) ค้นหา 5 แผ่นงานล่าสุดเพื่อความไว
+    const limitSheets = (assignee && assignee !== "ALL") ? 10 : 5;
+    targetSheetNames = sortedSheets.slice(0, limitSheets);
   }
 
   const tasks = [];
@@ -845,12 +856,14 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
           continue;
         }
 
-        // 4. แปลงลิงก์ใบบรีฟ Col D ให้เป็น https://docs.google.com/presentation/d/.../edit เสมอ
+        // 4. แปลงลิงก์ใบบรีฟ Col D (มี Time-Guard: ถ้ารันเกิน 3.5 วินาทีแล้ว จะข้ามการค้นหา Drive สดเพื่อส่งข้อมูลกลับทันที)
+        const allowDriveSearch = (Date.now() - startTime) < 3500;
         const taskBriefLink = normalizeToPresentationUrl(
           currentBriefLink,
           currentBriefTitle,
           scriptCache,
-          memoryBriefCache
+          memoryBriefCache,
+          allowDriveSearch
         );
 
         const team = (vals[CONFIG.COL_TEAM - 1]?.formattedValue || "").toString().trim();
@@ -878,11 +891,12 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
   } else {
     // Fallback: กรณี API มีปัญหา ให้ใช้วิธีอ่านปกติของ SpreadsheetApp
     Logger.log("Falling back to standard SpreadsheetApp reading");
+    const maxFallbackRow = targetSheetNames.length === 1 ? 350 : 180;
     for (let sIdx = 0; sIdx < targetSheetNames.length; sIdx++) {
       const sName = targetSheetNames[sIdx];
       const sheet = ss.getSheetByName(sName);
       if (!sheet) continue;
-      const lastRow = Math.min(sheet.getLastRow(), 120);
+      const lastRow = Math.min(sheet.getLastRow(), maxFallbackRow);
       if (lastRow < CONFIG.DATA_START_ROW) continue;
 
       const range = sheet.getRange(1, 1, lastRow, 14);
@@ -939,11 +953,13 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
         const isCompleted = status.includes("เสร็จสิ้น") || (uploadUrl !== "" && uploadCellText !== "");
         if (pendingOnly && isCompleted) continue;
 
+        const allowDriveSearch = (Date.now() - startTime) < 3500;
         const taskBriefLink = normalizeToPresentationUrl(
           currentBriefLink,
           currentBriefTitle,
           scriptCache,
-          memoryBriefCache
+          memoryBriefCache,
+          allowDriveSearch
         );
 
         const team = values[rowIdx][CONFIG.COL_TEAM - 1]?.toString().trim() || "";
