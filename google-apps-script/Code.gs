@@ -954,7 +954,7 @@ function fetchSheetsGridDataFast(spreadsheetId, sheetNames) {
     const rangesParam = sheetNames
       .map(name => `ranges=${encodeURIComponent(`'${name}'!A1:L${maxRow}`)}`)
       .join("&");
-    const fields = "sheets(properties(title),data(rowData(values(formattedValue,hyperlink,note,userEnteredValue(formulaValue),textFormatRuns(format(link(uri))),chipRuns(chip(richLinkProperties(uri),driveProperties(fileId)))))))";
+    const fields = "sheets(properties(title),data(rowData(values(formattedValue,hyperlink,note,userEnteredValue,textFormatRuns,chipRuns))))";
     const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?${rangesParam}&fields=${encodeURI(fields)}`;
 
     const res = UrlFetchApp.fetch(apiUrl, {
@@ -1018,19 +1018,31 @@ function extractApiCellInfo(cellObj) {
     }
   }
 
-  // 2. ดึงลิงก์จาก Google Drive Smart Chip ทันที (ทั้ง richLinkProperties และ driveProperties)
+  // 2. ดึงลิงก์จาก Google Drive Smart Chip ทันที (ตรวจสอบทุกโครงสร้างที่เป็นไปได้)
   if (!link && cellObj.chipRuns && cellObj.chipRuns.length > 0) {
     for (let i = 0; i < cellObj.chipRuns.length; i++) {
       const chip = cellObj.chipRuns[i].chip;
       if (!chip) continue;
-      if (chip.richLinkProperties?.uri) {
+
+      if (chip.richLinkProperties && chip.richLinkProperties.uri) {
         link = chip.richLinkProperties.uri.trim();
         break;
       }
-      if (chip.driveProperties?.fileId) {
-        link = "https://drive.google.com/drive/folders/" + chip.driveProperties.fileId;
-        break;
+
+      for (const k in chip) {
+        const item = chip[k];
+        if (item && typeof item === "object") {
+          if (item.uri && typeof item.uri === "string") {
+            link = item.uri.trim();
+            break;
+          }
+          if (item.fileId && typeof item.fileId === "string") {
+            link = "https://drive.google.com/open?id=" + item.fileId.trim();
+            break;
+          }
+        }
       }
+      if (link) break;
     }
   }
 
@@ -1353,58 +1365,114 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force) {
 }
 
 /**
- * ฟังก์ชันช่วยเขียนลิงก์โฟลเดอร์ TH + Note ลิงก์ INTER + สถานะเสร็จสิ้น ลงใน Google Sheets อย่างแม่นยำและรวดเร็ว
+ * ฟังก์ชันช่วยเขียน Google Drive Smart Chip แท้ๆ + Note ลิงก์ INTER + สถานะเสร็จสิ้น ลงใน Google Sheets อย่างแม่นยำและรวดเร็ว
  */
 function writeSmartChipsBatchToSheet(spreadsheetId, sheet, updates) {
   if (!updates || updates.length === 0) return { success: false, error: "No updates" };
+  const sheetId = sheet.getSheetId();
 
+  // สร้าง Requests สำหรับเขียน Google Drive Smart Chip แท้ๆ ผ่าน Google Sheets API v4
+  const chipRequests = updates.map(function(u) {
+    const rowIndex = u.row - 1;
+    return {
+      updateCells: {
+        range: {
+          sheetId: sheetId,
+          startRowIndex: rowIndex,
+          endRowIndex: rowIndex + 1,
+          startColumnIndex: CONFIG.COL_UPLOAD_LINK - 1,
+          endColumnIndex: CONFIG.COL_UPLOAD_LINK
+        },
+        rows: [{
+          values: [{
+            userEnteredValue: { stringValue: "@" },
+            chipRuns: [
+              {
+                startIndex: 0,
+                chip: {
+                  richLinkProperties: {
+                    uri: u.thUrl
+                  }
+                }
+              }
+            ]
+          }]
+        }],
+        fields: "userEnteredValue,chipRuns"
+      }
+    };
+  });
+
+  let apiSuccess = false;
+  let errorDetail = "";
+
+  // ขั้นตอนที่ 1: เรียกใช้ Sheets API v4 เพื่อสร้าง Smart Chip การ์ดสวยงามทันที
+  try {
+    const token = ScriptApp.getOAuthToken();
+    const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`;
+    const res = UrlFetchApp.fetch(apiUrl, {
+      method: "post",
+      contentType: "application/json",
+      headers: { "Authorization": "Bearer " + token },
+      payload: JSON.stringify({ requests: chipRequests }),
+      muteHttpExceptions: true
+    });
+
+    if (res.getResponseCode() === 200) {
+      apiSuccess = true;
+      Logger.log("สร้าง Google Drive Smart Chip สำเร็จผ่าน Sheets API v4");
+    } else {
+      errorDetail = `UrlFetchApp (${res.getResponseCode()}): ${res.getContentText()}`;
+      Logger.log("UrlFetchApp batchUpdate response: " + errorDetail);
+    }
+  } catch (e) {
+    errorDetail = e.message;
+    Logger.log("UrlFetchApp batchUpdate error: " + e.message);
+  }
+
+  // ขั้นตอนที่ 2: หาก Sheets API ไม่สำเร็จ ให้ใช้ Fallback RichText Hyperlink เพื่อรับประกันว่ามีลิงก์เปิดได้เสมอ
+  if (!apiSuccess) {
+    Logger.log("ใช้ Fallback RichText Hyperlink: " + errorDetail);
+    for (let i = 0; i < updates.length; i++) {
+      const u = updates[i];
+      try {
+        const cellF = sheet.getRange(u.row, CONFIG.COL_UPLOAD_LINK);
+        if (u.thUrl) {
+          const richValue = SpreadsheetApp.newRichTextValue()
+            .setText(u.taskName || `งานแถวที่ ${u.row}`)
+            .setLinkUrl(u.thUrl)
+            .build();
+          cellF.setRichTextValue(richValue);
+          cellF.setFontLine("none");
+          cellF.setFontColor("#000000");
+        } else if (u.taskName) {
+          cellF.setValue(u.taskName);
+        }
+      } catch (eRich) {
+        Logger.log(`ตั้งค่า RichText แถว ${u.row} ไม่สำเร็จ: ${eRich.message}`);
+      }
+    }
+  }
+
+  // ขั้นตอนที่ 3: บันทึก Note ของ INTER และเปลี่ยนสถานะ Col L เป็น "เสร็จสิ้น"
   for (let i = 0; i < updates.length; i++) {
     const u = updates[i];
     try {
       const cellF = sheet.getRange(u.row, CONFIG.COL_UPLOAD_LINK);
-
-      // สร้าง RichText Hyperlink ที่ชี้ไปยัง u.thUrl โดยคงชื่องานเดิมไว้ครบถ้วน
-      if (u.thUrl) {
-        const richValue = SpreadsheetApp.newRichTextValue()
-          .setText(u.taskName || `งานแถวที่ ${u.row}`)
-          .setLinkUrl(u.thUrl)
-          .build();
-        cellF.setRichTextValue(richValue);
-      } else if (u.taskName) {
-        cellF.setValue(u.taskName);
-      }
-
-      // บังคับรูปแบบตัวหนังสือ: ไม่ใส่เส้นใต้ และใช้สีดำเดิมตามเซลล์
-      try {
-        cellF.setFontLine("none");
-        cellF.setFontColor("#000000");
-      } catch (eFmt) {}
-
-      // บันทึกลิงก์ของ INTER ลงใน Note ของเซลล์ Col F
       if (u.interUrl) {
-        try {
-          cellF.setNote(`INTER: ${u.interUrl}`);
-        } catch (eNote) {
-          Logger.log(`ตั้งค่า Note แถว ${u.row} ไม่สำเร็จ: ${eNote.message}`);
-        }
+        cellF.setNote(`INTER: ${u.interUrl}`);
       }
-
-      // ปรับสถานะใน Col L เป็น "เสร็จสิ้น" (ไม่มีอีโมจิ)
       const cellL = sheet.getRange(u.row, CONFIG.COL_STATUS);
-      try {
-        cellL.setValue("เสร็จสิ้น");
-      } catch (e1) {
-        Logger.log(`ตั้งค่าสถานะแถว ${u.row} ไม่สำเร็จ: ${e1.message}`);
-      }
-    } catch (e) {
-      Logger.log(`อัปเดตเซลล์แถว ${u.row} ไม่สำเร็จ: ${e.message}`);
+      cellL.setValue("เสร็จสิ้น");
+    } catch (e2) {
+      Logger.log(`ตั้งค่าสถานะ/Note แถว ${u.row} ไม่สำเร็จ: ${e2.message}`);
     }
   }
 
   return {
     success: true,
-    method: "RichText",
-    error: ""
+    smartChip: apiSuccess,
+    error: errorDetail
   };
 }
 
