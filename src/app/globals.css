@@ -1,32 +1,32 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f8f6f0;
-  --foreground: #2d2a26;
+  --background: #f2f2f7;
+  --foreground: #1c1c1e;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Sarabun", "Noto Sans Thai", "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Sarabun", "Noto Sans Thai", "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Custom Scrollbar MUJI Style */
+/* Custom Scrollbar Apple iOS Style */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #f8f6f0;
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #ded7cb;
+  background: #d1d1d6;
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #c8c0b2;
+  background: #8e8e93;
 }
 
 /* ซ่อน Next.js Dev Indicator / Tooling Overlay ที่มุมจอ */
