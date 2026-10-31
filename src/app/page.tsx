@@ -47,15 +47,16 @@ interface Task {
 }
 
 const CATEGORY_COLORS: Record<string, { bg: string; text: string; border: string; dot: string }> = {
-  สล็อต: { bg: "bg-[#5856D6]/10", text: "text-[#5856D6]", border: "border-[#5856D6]/20", dot: "bg-[#5856D6]" },
-  คาสิโน: { bg: "bg-[#34C759]/12", text: "text-[#248A3D]", border: "border-[#34C759]/25", dot: "bg-[#34C759]" },
-  บอล: { bg: "bg-[#007AFF]/10", text: "text-[#007AFF]", border: "border-[#007AFF]/25", dot: "bg-[#007AFF]" },
-  มวย: { bg: "bg-[#FF3B30]/10", text: "text-[#D70015]", border: "border-[#FF3B30]/25", dot: "bg-[#FF3B30]" },
-  หวย: { bg: "bg-[#FF2D55]/10", text: "text-[#D0093A]", border: "border-[#FF2D55]/25", dot: "bg-[#FF2D55]" },
-  "หวย APB": { bg: "bg-[#AF52DE]/10", text: "text-[#8932B8]", border: "border-[#AF52DE]/25", dot: "bg-[#AF52DE]" },
-  เกมสล็อต: { bg: "bg-[#5856D6]/10", text: "text-[#5856D6]", border: "border-[#5856D6]/20", dot: "bg-[#5856D6]" },
-  ไก่ชน: { bg: "bg-[#FF9500]/12", text: "text-[#C97700]", border: "border-[#FF9500]/25", dot: "bg-[#FF9500]" },
-  วัวชน: { bg: "bg-[#A2845E]/12", text: "text-[#7F6443]", border: "border-[#A2845E]/25", dot: "bg-[#A2845E]" },
+  สล็อต: { bg: "bg-[#FF453A]/12", text: "text-[#E02E24]", border: "border-[#FF453A]/25", dot: "bg-[#FF453A]" }, // แดงอ่อน
+  เกมสล็อต: { bg: "bg-[#FF453A]/12", text: "text-[#E02E24]", border: "border-[#FF453A]/25", dot: "bg-[#FF453A]" }, // แดงอ่อน
+  คาสิโน: { bg: "bg-[#FF9500]/12", text: "text-[#C97700]", border: "border-[#FF9500]/25", dot: "bg-[#FF9500]" }, // ส้ม
+  บอล: { bg: "bg-[#007AFF]/12", text: "text-[#007AFF]", border: "border-[#007AFF]/25", dot: "bg-[#007AFF]" }, // ฟ้า
+  มวย: { bg: "bg-[#34C759]/15", text: "text-[#248A3D]", border: "border-[#34C759]/30", dot: "bg-[#34C759]" }, // เขียวอ่อน
+  หวย: { bg: "bg-[#FF3B30]/12", text: "text-[#D70015]", border: "border-[#FF3B30]/30", dot: "bg-[#FF3B30]" }, // แดง
+  "หวย APB": { bg: "bg-[#FF3B30]/12", text: "text-[#D70015]", border: "border-[#FF3B30]/30", dot: "bg-[#FF3B30]" }, // แดง
+  ไก่ชน: { bg: "bg-[#AF52DE]/12", text: "text-[#8932B8]", border: "border-[#AF52DE]/30", dot: "bg-[#AF52DE]" }, // ม่วง
+  วัวชน: { bg: "bg-[#FF2D55]/12", text: "text-[#D0093A]", border: "border-[#FF2D55]/30", dot: "bg-[#FF2D55]" }, // แดงออกชมพู
+  "กีฬาอื่นๆ": { bg: "bg-[#767680]/12", text: "text-[#636366]", border: "border-[#767680]/20", dot: "bg-[#8E8E93]" }, // เทาเดิม
   "UFA NEWS": { bg: "bg-[#30B0C7]/12", text: "text-[#1C8294]", border: "border-[#30B0C7]/25", dot: "bg-[#30B0C7]" },
   แคมเปญ: { bg: "bg-[#00C7BE]/12", text: "text-[#008F88]", border: "border-[#00C7BE]/25", dot: "bg-[#00C7BE]" },
   กิจกรรมกลาง: { bg: "bg-[#FFCC00]/15", text: "text-[#9E7D00]", border: "border-[#FFCC00]/30", dot: "bg-[#FFCC00]" },
@@ -1043,7 +1044,7 @@ export default function HomePage() {
     <div className="min-h-screen bg-[#F2F2F7] flex flex-col font-sans pb-32">
       {/* iOS 18 Frosted Glass Header */}
       <header className="bg-[#F2F2F7]/80 backdrop-blur-2xl border-b border-black/[0.06] sticky top-0 z-30 transition-all">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+        <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-[12px] bg-gradient-to-b from-[#1C1C1E] to-[#000000] flex items-center justify-center text-white shadow-xs ring-1 ring-black/5">
               <FolderPlus className="w-5 h-5 text-white" />
@@ -1098,7 +1099,7 @@ export default function HomePage() {
       </header>
 
       {/* Main Container */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full flex flex-col gap-6">
+      <main className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full flex flex-col gap-6">
         {/* Error Alert Box */}
         {errorMessage && (
           <div className="bg-[#FF3B30]/10 border border-[#FF3B30]/20 rounded-2xl p-4 flex items-start gap-3">
@@ -1679,13 +1680,13 @@ export default function HomePage() {
                       <tr className="bg-[#F2F2F7] text-[11px] font-semibold text-[#8E8E93] uppercase tracking-wider">
                         <th className="py-3.5 px-3 w-12 text-center text-[#8E8E93] border-b border-[#E5E5EA]">เลือก</th>
                         <th className="py-3.5 px-2 w-14 text-center text-[#8E8E93] border-b border-[#E5E5EA]">แถว</th>
-                        <th className="py-3.5 px-3 w-32 whitespace-nowrap text-[#8E8E93] border-b border-[#E5E5EA]">หมวดหมู่</th>
-                        <th className="py-3.5 px-3 min-w-[160px] w-48 whitespace-nowrap text-[#8E8E93] border-b border-[#E5E5EA]">ใบบรีฟ</th>
+                        <th className="py-3.5 px-3 whitespace-nowrap text-[#8E8E93] border-b border-[#E5E5EA]">หมวดหมู่</th>
+                        <th className="py-3.5 px-2.5 w-32 max-w-[150px] whitespace-nowrap text-[#8E8E93] border-b border-[#E5E5EA]">ใบบรีฟ</th>
                         <th className="py-3.5 px-2 w-12 text-center text-[#8E8E93] border-b border-[#E5E5EA]">No.</th>
-                        <th className="py-3.5 px-4 min-w-[240px] whitespace-nowrap text-[#8E8E93] border-b border-[#E5E5EA]">ชื่องาน/ชื่อโฟลเดอร์ (TH)</th>
-                        <th className="py-3.5 px-3 w-36 whitespace-nowrap text-center text-[#8E8E93] border-b border-[#E5E5EA]">วันที่จ่ายงาน</th>
+                        <th className="py-3.5 px-4 min-w-[340px] text-[#8E8E93] border-b border-[#E5E5EA]">ชื่องาน/ชื่อโฟลเดอร์ (TH)</th>
+                        <th className="py-3.5 px-3 whitespace-nowrap text-center text-[#8E8E93] border-b border-[#E5E5EA]">วันที่จ่ายงาน</th>
                         <th className="py-3.5 px-3 w-28 whitespace-nowrap text-center text-[#8E8E93] border-b border-[#E5E5EA]">สถานะ</th>
-                        <th className="py-3.5 px-3 w-44 whitespace-nowrap text-center text-[#8E8E93] border-b border-[#E5E5EA]">ลิงก์โฟลเดอร์ (TH & INTER)</th>
+                        <th className="py-3.5 px-3 w-40 whitespace-nowrap text-center text-[#8E8E93] border-b border-[#E5E5EA]">ลิงก์โฟลเดอร์ (TH & INTER)</th>
                       </tr>
                     </thead>
                     <tbody className="text-sm bg-white">
@@ -1738,15 +1739,15 @@ export default function HomePage() {
                             <td className={`py-3.5 px-2 text-center text-xs font-mono font-semibold text-[#8E8E93] ${cellBorder}`}>
                               #{task.row}
                             </td>
-                            <td className={`py-3.5 px-3 ${cellBorder}`}>
+                            <td className={`py-3.5 px-3 whitespace-nowrap ${cellBorder}`}>
                               <span
-                                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${catStyle.bg} ${catStyle.text} ${catStyle.border} shadow-2xs`}
+                                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap border ${catStyle.bg} ${catStyle.text} ${catStyle.border} shadow-2xs`}
                               >
                                 <span className={`w-1.5 h-1.5 rounded-full ${catStyle.dot}`} />
                                 <span>{task.category}</span>
                               </span>
                             </td>
-                            <td className={`py-3.5 px-3 ${cellBorder}`} onClick={(e) => e.stopPropagation()}>
+                            <td className={`py-3.5 px-2.5 w-32 max-w-[150px] ${cellBorder}`} onClick={(e) => e.stopPropagation()}>
                               {(() => {
                                 const rawLink = (task.briefLink || "").trim();
                                 const titleText = (task.briefTitle || "").trim() || "ใบบรีฟ";
@@ -1764,7 +1765,7 @@ export default function HomePage() {
                                       href={targetUrl}
                                       target="_blank"
                                       rel="noopener noreferrer"
-                                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#007AFF] hover:text-[#0066D6] bg-[#007AFF]/10 hover:bg-[#007AFF]/15 border border-[#007AFF]/20 px-2.5 py-1 rounded-xl transition-all shadow-2xs max-w-[320px] group"
+                                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#007AFF] hover:text-[#0066D6] bg-[#007AFF]/10 hover:bg-[#007AFF]/15 border border-[#007AFF]/20 px-2.5 py-1 rounded-xl transition-all shadow-2xs max-w-[140px] group"
                                       title={`คลิกเปิดใบบรีฟ Google Slides: ${titleText}`}
                                     >
                                       <ExternalLink className="w-3 h-3 text-[#007AFF] group-hover:text-[#0066D6] shrink-0" />
@@ -1779,7 +1780,7 @@ export default function HomePage() {
                             <td className={`py-3.5 px-2 text-center font-mono font-bold text-[#1C1C1E] ${cellBorder}`}>
                               {task.no || "-"}
                             </td>
-                            <td className={`py-3.5 px-4 ${cellBorder}`} onClick={(e) => e.stopPropagation()}>
+                            <td className={`py-3.5 px-4 min-w-[340px] ${cellBorder}`} onClick={(e) => e.stopPropagation()}>
                               {(() => {
                                 const currentInput = (taskNamesMap[key] ?? "").trim();
                                 const originalName = (task.taskName || "").trim();
@@ -1823,22 +1824,21 @@ export default function HomePage() {
                                 if (dayInfo) {
                                   return (
                                     <span
-                                      className={`inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${dayInfo.bg} ${dayInfo.text} ${dayInfo.border} shadow-2xs`}
+                                      className={`inline-flex items-center justify-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border ${dayInfo.bg} ${dayInfo.text} ${dayInfo.border} shadow-2xs`}
                                       title={`วันที่จ่ายงาน (Col K): ${dayInfo.name} ที่ ${rawDate}`}
                                     >
-                                      <span className={`w-1.5 h-1.5 rounded-full ${dayInfo.dot} shrink-0`} />
                                       <span className="font-bold">{dayInfo.short}</span>
-                                      <span className="font-mono">{rawDate}</span>
+                                      <span className="font-semibold tabular-nums">{rawDate}</span>
                                     </span>
                                   );
                                 }
                                 return (
                                   <span
-                                    className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-mono font-medium text-[#1C1C1E] bg-[#F2F2F7] border border-black/[0.06] shadow-2xs"
+                                    className="inline-flex items-center justify-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold text-[#1C1C1E] bg-[#F2F2F7] border border-black/[0.06] shadow-2xs"
                                     title={`วันที่จ่ายงาน (Col K): ${rawDate}`}
                                   >
                                     <Calendar className="w-3 h-3 text-[#007AFF] shrink-0" />
-                                    <span>{rawDate}</span>
+                                    <span className="tabular-nums">{rawDate}</span>
                                   </span>
                                 );
                               })()}
