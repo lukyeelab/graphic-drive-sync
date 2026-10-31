@@ -9,7 +9,6 @@ import {
   Clock,
   Layers,
   Sparkles,
-  HelpCircle,
   FolderCheck,
   AlertCircle,
   FileSpreadsheet,
@@ -894,14 +893,6 @@ const renderDateCheckbox = (s: string) => {
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowGuide(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#5C564D] bg-[#F4F1EA] hover:bg-[#EAE5DC] border border-[#E0DACF] rounded-xl transition-all cursor-pointer active:scale-95"
-            >
-              <HelpCircle className="w-3.5 h-3.5 text-[#7A7368]" />
-              <span className="hidden sm:inline">วิธีตั้งค่าสิทธิ์</span>
-              <span className="sm:hidden">วิธีใช้</span>
-            </button>
             <a
               href="https://docs.google.com/spreadsheets/d/1WIm3CzQ708nHcdIFQBnQEDBHWjBGeOCQL_MEAO2rBD8/edit"
               target="_blank"
