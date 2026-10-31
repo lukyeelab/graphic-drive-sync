@@ -93,9 +93,13 @@ export async function GET(req: NextRequest) {
 
     // กรณีขอ Metadata (รายชื่อแผ่นงาน + รายชื่อพนักงาน)
     if (action === "getMetadata") {
+      const force = searchParams.get("force") === "true";
       // 1. ลองเรียก action=getMetadata จาก GAS
       let targetUrl = new URL(gasUrl);
       targetUrl.searchParams.set("action", "getMetadata");
+      if (force) {
+        targetUrl.searchParams.set("force", "true");
+      }
 
       let res = await fetch(targetUrl.toString(), {
         method: "GET",

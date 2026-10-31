@@ -961,13 +961,19 @@ function fetchSheetNamesViaApiFast(spreadsheetId) {
 /**
  * ดึงรายชื่อพนักงานและแท็บวันที่ทั้งหมด (Optimized: ไม่เรียก ss.getSheets() ที่ช้าเมื่อมี 52 แท็บ + แคช 30 นาที)
  */
-function getInitialMetadata() {
+/**
+ * ดึงข้อมูลเบื้องต้น: รายชื่อแท็บวันที่ทั้งหมด และรายชื่อพนักงานทุกคนที่มีในชีต
+ * Optimized: สแกนครอบคลุมแท็บวันที่ทั้งหมด (35-40 แผ่นงาน) ด้วย Batch API รวดเดียว (~0.2 วินาที)
+ */
+function getInitialMetadata(force) {
   const cache = CacheService.getScriptCache();
-  const cachedMeta = cache.get("INITIAL_METADATA_V5");
-  if (cachedMeta) {
-    try {
-      return JSON.parse(cachedMeta);
-    } catch (e) {}
+  if (!force) {
+    const cachedMeta = cache.get("INITIAL_METADATA_V6");
+    if (cachedMeta) {
+      try {
+        return JSON.parse(cachedMeta);
+      } catch (e) {}
+    }
   }
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -975,48 +981,86 @@ function getInitialMetadata() {
   const sheetNames = fetchSheetNamesViaApiFast(ssId);
   const staffSet = { "ลูกหยี": true };
 
-  // สแกนรายชื่อพนักงานจาก 4 แผ่นงานล่าสุดด้วย Batch API รวดเดียว
+  // กรองเฉพาะแท็บวันที่จริง และเรียงจากล่าสุดไปอดีต
   const sortedForStaff = sortSheetNamesDesc(sheetNames);
-  const sheetsToCheck = sortedForStaff.slice(0, 4);
+  const dateSheets = sortedForStaff.filter(n => {
+    const t = n.trim();
+    return t !== "TEM" && /^\d+\s*[\u0E00-\u0E7F]/.test(t);
+  });
+  // สแกนครอบคลุมแท็บวันที่ทั้งหมด (สูงสุด 40 แผ่นงาน) เพื่อให้ได้รายชื่อพนักงานครบทุกคน 100%
+  const sheetsToCheck = dateSheets.length > 0 ? dateSheets.slice(0, 40) : sortedForStaff.slice(0, 40);
   let apiFetched = false;
-  try {
-    const token = ScriptApp.getOAuthToken();
-    const rangesParam = sheetsToCheck
-      .map(n => `ranges=${encodeURIComponent(`'${n}'!J${CONFIG.DATA_START_ROW}:J150`)}`)
-      .join("&");
-    const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${ssId}/values:batchGet?${rangesParam}`;
-    const res = UrlFetchApp.fetch(apiUrl, {
-      method: "get",
-      headers: { "Authorization": "Bearer " + token },
-      muteHttpExceptions: true
-    });
-    if (res.getResponseCode() === 200) {
-      const data = JSON.parse(res.getContentText());
-      const valueRanges = data.valueRanges || [];
-      for (let i = 0; i < valueRanges.length; i++) {
-        const rows = valueRanges[i].values || [];
-        for (let r = 0; r < rows.length; r++) {
-          const val = (rows[r][0] || "").toString().trim();
-          if (val && val !== "-" && val !== "ผู้รับงาน" && val !== "undefined" && val.length > 0) {
-            staffSet[val] = true;
+
+  // วิธีที่ 1: ดึงผ่าน Google Sheets Advanced Service (เร็วที่สุด ~0.1-0.2 วินาทีในคำสั่งเดียว ไม่ติดข้อจำกัด URL)
+  if (typeof Sheets !== "undefined" && Sheets && Sheets.Spreadsheets && Sheets.Spreadsheets.Values && typeof Sheets.Spreadsheets.Values.batchGet === "function") {
+    try {
+      const ranges = sheetsToCheck.map(n => `'${n}'!J${CONFIG.DATA_START_ROW}:J150`);
+      const res = Sheets.Spreadsheets.Values.batchGet(ssId, { ranges: ranges });
+      if (res && res.valueRanges) {
+        for (let i = 0; i < res.valueRanges.length; i++) {
+          const rows = res.valueRanges[i].values || [];
+          for (let r = 0; r < rows.length; r++) {
+            const val = (rows[r][0] || "").toString().trim();
+            if (val && val !== "-" && val !== "ผู้รับงาน" && val !== "กราฟิก" && val !== "ชื่อ" && val !== "undefined" && val.length > 0) {
+              staffSet[val] = true;
+            }
           }
         }
+        apiFetched = true;
       }
-      apiFetched = true;
+    } catch (eAdv) {
+      Logger.log("getInitialMetadata Advanced Service error: " + eAdv.message);
     }
-  } catch (e) {}
+  }
 
-  // Fallback กรณี API ไม่พร้อมใช้งาน
+  // วิธีที่ 2: ดึงผ่าน UrlFetchApp โดยแบ่งเป็น Chunk ละ 25 แผ่นงาน (เพื่อความเร็วและไม่เกินขีดจำกัดความยาว URL)
   if (!apiFetched) {
-    for (let s = 0; s < sheetsToCheck.length; s++) {
-      const sheet = ss.getSheetByName(sheetsToCheck[s]);
+    try {
+      const token = ScriptApp.getOAuthToken();
+      const chunkSize = 25;
+      for (let c = 0; c < sheetsToCheck.length; c += chunkSize) {
+        const chunk = sheetsToCheck.slice(c, c + chunkSize);
+        const rangesParam = chunk
+          .map(n => `ranges=${encodeURIComponent(`'${n}'!J${CONFIG.DATA_START_ROW}:J150`)}`)
+          .join("&");
+        const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${ssId}/values:batchGet?${rangesParam}`;
+        const res = UrlFetchApp.fetch(apiUrl, {
+          method: "get",
+          headers: { "Authorization": "Bearer " + token },
+          muteHttpExceptions: true
+        });
+        if (res.getResponseCode() === 200) {
+          const data = JSON.parse(res.getContentText());
+          const valueRanges = data.valueRanges || [];
+          for (let i = 0; i < valueRanges.length; i++) {
+            const rows = valueRanges[i].values || [];
+            for (let r = 0; r < rows.length; r++) {
+              const val = (rows[r][0] || "").toString().trim();
+              if (val && val !== "-" && val !== "ผู้รับงาน" && val !== "กราฟิก" && val !== "ชื่อ" && val !== "undefined" && val.length > 0) {
+                staffSet[val] = true;
+              }
+            }
+          }
+          apiFetched = true;
+        }
+      }
+    } catch (e) {
+      Logger.log("getInitialMetadata UrlFetchApp error: " + e.message);
+    }
+  }
+
+  // วิธีที่ 3: Fallback หาก API ไม่พร้อมใช้งาน ให้สแกน 15 แผ่นงานล่าสุดผ่าน SpreadsheetApp
+  if (!apiFetched) {
+    const fallbackSheets = sheetsToCheck.slice(0, 15);
+    for (let s = 0; s < fallbackSheets.length; s++) {
+      const sheet = ss.getSheetByName(fallbackSheets[s]);
       if (!sheet) continue;
       const lastRow = sheet.getLastRow();
       if (lastRow >= CONFIG.DATA_START_ROW) {
         const assignees = sheet.getRange(CONFIG.DATA_START_ROW, CONFIG.COL_ASSIGNEE, Math.min(lastRow - CONFIG.DATA_START_ROW + 1, 150), 1).getValues();
         for (let r = 0; r < assignees.length; r++) {
           const val = assignees[r][0]?.toString().trim();
-          if (val && val !== "-" && val !== "ผู้รับงาน" && val !== "undefined" && val.length > 0) {
+          if (val && val !== "-" && val !== "ผู้รับงาน" && val !== "กราฟิก" && val !== "ชื่อ" && val !== "undefined" && val.length > 0) {
             staffSet[val] = true;
           }
         }
@@ -1031,7 +1075,7 @@ function getInitialMetadata() {
   };
 
   try {
-    cache.put("INITIAL_METADATA_V5", JSON.stringify(result), 1800); // แคช 30 นาที
+    cache.put("INITIAL_METADATA_V6", JSON.stringify(result), 1800); // แคช 30 นาที
   } catch (e) {}
 
   return result;
@@ -2077,7 +2121,8 @@ function doGet(e) {
 
     let data;
     if (action === "getMetadata") {
-      data = getInitialMetadata();
+      const force = e.parameter.force === "true";
+      data = getInitialMetadata(force);
     } else if (action === "getSheets") {
       const ss = SpreadsheetApp.getActiveSpreadsheet();
       const sheetNames = getSheetNamesFast(ss);
