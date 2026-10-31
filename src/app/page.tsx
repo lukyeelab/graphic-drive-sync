@@ -165,9 +165,26 @@ export default function HomePage() {
   // กรองและอัปเดตงานลง State ทันทีใน Memory (0 ms)
   const applyTasksToState = (allTasks: Task[], targetAssignee: string) => {
     const searchLower = (targetAssignee || "").toLowerCase().trim();
-    const loadedTasks = searchLower && searchLower !== "all"
+    const rawLoaded = searchLower && searchLower !== "all"
       ? allTasks.filter((t) => (t.assignee || "").toLowerCase().includes(searchLower))
       : allTasks;
+
+    // ถ้างานไหนยังไม่มีทั้งชื่อและลิงก์งาน คืองานยังไม่เสร็จ (isCompleted: false) เสมอ
+    const loadedTasks = rawLoaded.map((t) => {
+      const hasName = !!(t.taskName && t.taskName.trim() !== "");
+      const hasLink = !!(t.uploadUrl && t.uploadUrl.trim() !== "");
+      const isMissingNameAndLink = !hasName && !hasLink;
+      const reallyCompleted = isMissingNameAndLink ? false : t.isCompleted;
+      const effectiveStatus = isMissingNameAndLink && (t.status || "").includes("เสร็จสิ้น")
+        ? "กำลังทำ"
+        : (t.status || "กำลังทำ");
+
+      return {
+        ...t,
+        isCompleted: reallyCompleted,
+        status: effectiveStatus,
+      };
+    });
 
     setTasks(loadedTasks);
 
@@ -200,9 +217,26 @@ export default function HomePage() {
   // ทยอยเพิ่มงานลง State ทีละชุดที่ดึงเสร็จทันที (Progressive Rendering)
   const appendTasksToState = (newBatchTasks: Task[], targetAssignee: string) => {
     const searchLower = (targetAssignee || "").toLowerCase().trim();
-    const filteredNew = searchLower && searchLower !== "all"
+    const rawFiltered = searchLower && searchLower !== "all"
       ? newBatchTasks.filter((t) => (t.assignee || "").toLowerCase().includes(searchLower))
       : newBatchTasks;
+
+    // ถ้างานไหนยังไม่มีทั้งชื่อและลิงก์งาน คืองานยังไม่เสร็จ (isCompleted: false) เสมอ
+    const filteredNew = rawFiltered.map((t) => {
+      const hasName = !!(t.taskName && t.taskName.trim() !== "");
+      const hasLink = !!(t.uploadUrl && t.uploadUrl.trim() !== "");
+      const isMissingNameAndLink = !hasName && !hasLink;
+      const reallyCompleted = isMissingNameAndLink ? false : t.isCompleted;
+      const effectiveStatus = isMissingNameAndLink && (t.status || "").includes("เสร็จสิ้น")
+        ? "กำลังทำ"
+        : (t.status || "กำลังทำ");
+
+      return {
+        ...t,
+        isCompleted: reallyCompleted,
+        status: effectiveStatus,
+      };
+    });
 
     setTasks((prevTasks) => {
       const newSheetNames = new Set(filteredNew.map((t) => t.sheetName));
@@ -706,8 +740,14 @@ export default function HomePage() {
 
   const filteredTasks = tasks.filter((t) => {
     const key = getTaskKey(t.sheetName, t.row);
+    const thUrl = (folderLinksMap[key]?.thUrl || t.uploadUrl || "").trim();
+    const taskNameCurrent = (taskNamesMap[key] || t.taskName || "").trim();
+    // ถ้างานไหนยังไม่มีชื่อและลิงก์งาน คืองานยังไม่เสร็จ (isCompleted: false)
+    const isMissingNameAndLink = !thUrl && !taskNameCurrent;
+    const isReallyCompleted = isMissingNameAndLink ? false : t.isCompleted;
+
     // หากงานเพิ่งเสร็จในรอบนี้ (justCompletedKeys) ให้แสดงไว้เสมอ ไม่ให้แถวหายไป แม้จะเปิด "เลือกเฉพาะงานที่ยังไม่เสร็จ"
-    if (pendingOnly && t.isCompleted && !justCompletedKeys.has(key)) {
+    if (pendingOnly && isReallyCompleted && !justCompletedKeys.has(key)) {
       return false;
     }
     const matchSearch =
@@ -769,7 +809,13 @@ const renderDateCheckbox = (s: string) => {
   };
 
   const totalTasks = tasks.length;
-  const pendingTasks = tasks.filter((t) => !t.isCompleted).length;
+  const pendingTasks = tasks.filter((t) => {
+    const key = getTaskKey(t.sheetName, t.row);
+    const thUrl = (folderLinksMap[key]?.thUrl || t.uploadUrl || "").trim();
+    const taskNameCurrent = (taskNamesMap[key] || t.taskName || "").trim();
+    const isMissingNameAndLink = !thUrl && !taskNameCurrent;
+    return isMissingNameAndLink ? true : !t.isCompleted;
+  }).length;
   const completedTasks = totalTasks - pendingTasks;
 
   return (
@@ -1523,22 +1569,37 @@ const renderDateCheckbox = (s: string) => {
                               </div>
                             </td>
                             <td className="py-3.5 px-3 text-center whitespace-nowrap">
-                              {isSyncingThis ? (
-                                <span className="inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-[#F8EFEA] text-[#8C3A27] border border-[#EACEC3] shadow-2xs">
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0 text-[#8C3A27]" />
-                                  <span>กำลังสร้าง...</span>
-                                </span>
-                              ) : task.isCompleted ? (
-                                <span className="inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-[#EFF5F0] text-[#34603B] border border-[#D1E4D4] shadow-2xs">
-                                  <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-[#34603B]" />
-                                  <span>เสร็จสิ้น</span>
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-[#FAF4EB] text-[#8C6228] border border-[#EADFCB] shadow-2xs">
-                                  <Clock className="w-3.5 h-3.5 shrink-0 text-[#8C6228]" />
-                                  <span>{cleanStatus(task.status) || "กำลังทำ"}</span>
-                                </span>
-                              )}
+                              {(() => {
+                                const thUrl = (folderLinksMap[key]?.thUrl || task.uploadUrl || "").trim();
+                                const taskNameCurrent = (taskNamesMap[key] || task.taskName || "").trim();
+                                const isMissingNameAndLink = !thUrl && !taskNameCurrent;
+                                const isReallyCompleted = isMissingNameAndLink ? false : task.isCompleted;
+
+                                if (isSyncingThis) {
+                                  return (
+                                    <span className="inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-[#F8EFEA] text-[#8C3A27] border border-[#EACEC3] shadow-2xs">
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0 text-[#8C3A27]" />
+                                      <span>กำลังสร้าง...</span>
+                                    </span>
+                                  );
+                                }
+
+                                if (isReallyCompleted) {
+                                  return (
+                                    <span className="inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-[#EFF5F0] text-[#34603B] border border-[#D1E4D4] shadow-2xs">
+                                      <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-[#34603B]" />
+                                      <span>เสร็จสิ้น</span>
+                                    </span>
+                                  );
+                                }
+
+                                return (
+                                  <span className="inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-[#FAF4EB] text-[#8C6228] border border-[#EADFCB] shadow-2xs">
+                                    <Clock className="w-3.5 h-3.5 shrink-0 text-[#8C6228]" />
+                                    <span>{cleanStatus(task.status) || "กำลังทำ"}</span>
+                                  </span>
+                                );
+                              })()}
                             </td>
                             <td className="py-3.5 px-3 text-center" onClick={(e) => e.stopPropagation()}>
                               {(() => {
@@ -1557,14 +1618,6 @@ const renderDateCheckbox = (s: string) => {
                                 }
 
                                 if (!thUrl && !interUrl) {
-                                  if (task.isCompleted) {
-                                    return (
-                                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#34603B] bg-[#EFF5F0] px-2.5 py-1 rounded-xl border border-[#D1E4D4]">
-                                        <CheckCircle2 className="w-3.5 h-3.5 text-[#34603B]" />
-                                        <span>เสร็จสิ้น (ยังไม่มีลิงก์)</span>
-                                      </span>
-                                    );
-                                  }
                                   return (
                                     <span className="text-xs text-[#A8A196] italic">รอสร้างโฟลเดอร์</span>
                                   );

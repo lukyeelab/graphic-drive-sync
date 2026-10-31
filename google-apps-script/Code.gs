@@ -1443,7 +1443,8 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force) {
             }
           }
 
-          const isCompleted = status.includes("เสร็จสิ้น") || (uploadUrl !== "" && uploadCellText !== "");
+          const hasNameOrLink = !!(uploadUrl || uploadCellText);
+          const isCompleted = hasNameOrLink ? (status.includes("เสร็จสิ้น") || uploadUrl !== "") : false;
           let taskBriefLink = fastFormatPresentationUrl(currentBriefLink);
           if (!taskBriefLink && currentBriefTitle) {
             if (briefSlideMemCache[currentBriefTitle] !== undefined) {
@@ -1555,7 +1556,8 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force) {
             interFolderUrl = noteMatch[1].trim();
           }
 
-          const isCompleted = status.includes("เสร็จสิ้น") || (uploadUrl !== "" && uploadCellText !== "");
+          const hasNameOrLink = !!(uploadUrl || uploadCellText);
+          const isCompleted = hasNameOrLink ? (status.includes("เสร็จสิ้น") || uploadUrl !== "") : false;
           let taskBriefLink = fastFormatPresentationUrl(currentBriefLink);
           if (!taskBriefLink && currentBriefTitle) {
             if (briefSlideMemCache[currentBriefTitle] !== undefined) {
