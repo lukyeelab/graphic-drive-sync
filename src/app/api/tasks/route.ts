@@ -135,8 +135,8 @@ export async function GET(req: NextRequest) {
       const rawSheets: string[] = (sheetsData.sheets || []).filter((s: string) => s !== "TEM");
       const sortedSheets = sortThaiDateSheets(rawSheets);
 
-      // ดึงรายชื่อพนักงานจากแผ่นงานหลัก (เช่น 7 พย)
-      const sampleSheet = sortedSheets.includes("7 พย") ? "7 พย" : sortedSheets[0] || "";
+      // ดึงรายชื่อพนักงานจากแผ่นงานล่าสุด
+      const sampleSheet = sortedSheets[0] || "";
       let staffList: string[] = [
         "ลูกหยี", "บอย", "วิน", "ปั้ม", "แม็กซ์", "เจมมี่", "เบียร์",
         "อีฟ", "เอิร์น", "ปอ", "พรีม", "แบงค์", "ปอนด์", "จ๊อบ",

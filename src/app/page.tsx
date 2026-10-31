@@ -61,17 +61,15 @@ const CATEGORY_COLORS: Record<string, { bg: string; text: string; border: string
 
 export default function HomePage() {
   const [assignee, setAssignee] = useState<string>("ลูกหยี");
-  const [sheetName, setSheetName] = useState<string>("7 พย");
+  const [sheetName, setSheetName] = useState<string>("");
   const [pendingOnly, setPendingOnly] = useState<boolean>(true);
   const [staffList, setStaffList] = useState<string[]>([
     "ลูกหยี", "บอย", "วิน", "ปั้ม", "แม็กซ์", "เจมมี่", "เบียร์",
     "อีฟ", "เอิร์น", "ปอ", "พรีม", "แบงค์", "ปอนด์", "จ๊อบ",
     "แพท", "กิ๊ก", "ภา", "เค้ก", "พี่นาย", "เม่น", "นิว", "มายด์", "เอ้"
   ]);
-  const [availableSheets, setAvailableSheets] = useState<string[]>([
-    "7 พย", "8 พย", "6 พย", "5 พย", "4 พย", "3 พย", "2 พย", "1 พย",
-    "31 ตค", "30 ตค", "29 ตค", "28 ตค", "27 ตค", "26 ตค", "25 ตค"
-  ]);
+  const [availableSheets, setAvailableSheets] = useState<string[]>([]);
+  const [isMetadataLoading, setIsMetadataLoading] = useState<boolean>(true);
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTaskKeys, setSelectedTaskKeys] = useState<string[]>([]);
@@ -168,16 +166,19 @@ export default function HomePage() {
     } catch (e) {}
   };
 
-  // โหลดรายชื่อพนักงานและแท็บวันที่ทั้งหมด
-  const loadMetadata = async () => {
+  // โหลดรายชื่อพนักงานและแท็บวันที่ทั้งหมดจากชีตจริง (ไม่ใช้ mockup วันที่)
+  const loadMetadata = async (initialAssignee: string) => {
+    setIsMetadataLoading(true);
     try {
       const res = await fetch("/api/tasks?action=getMetadata");
       const data = await res.json();
       if (data.success) {
         if (data.sheetNames && data.sheetNames.length > 0) {
           setAvailableSheets(data.sheetNames);
-          // ดึงงานของแผ่นงานล่าสุดมารอไว้เบื้องหลังทันที
-          prefetchSheetTasks(data.sheetNames[0]);
+          const latestSheet = data.sheetNames[0];
+          setSheetName(latestSheet);
+          // ดึงงานของแผ่นงานล่าสุดอัตโนมัติเมื่อได้วันที่จริงจาก Google Sheets
+          fetchTasks(initialAssignee, latestSheet);
         }
         if (data.staffList && data.staffList.length > 0) {
           setStaffList(data.staffList);
@@ -185,11 +186,15 @@ export default function HomePage() {
       }
     } catch (e) {
       console.log("Could not load initial metadata", e);
+    } finally {
+      setIsMetadataLoading(false);
     }
   };
 
   // โหลดรายการงานตามชื่อพนักงาน (Instant Cache + SWR)
   const fetchTasks = async (targetAssignee = assignee, targetSheet = sheetName, forceLoading = false) => {
+    if (!targetSheet) return;
+
     // 1. ตรวจสอบว่ามีข้อมูลใน Client Cache แล้วหรือไม่ ถ้ามีให้แสดงผลทันทีใน 0 มิลลิวินาที
     const cachedSheetTasks = clientSheetCacheRef.current[targetSheet];
     if (cachedSheetTasks && !forceLoading) {
@@ -274,14 +279,16 @@ export default function HomePage() {
     const initialName = savedName || "ลูกหยี";
     if (savedName) setAssignee(savedName);
 
-    fetchTasks(initialName, "7 พย");
-    loadMetadata();
+    // ดึง metadata วันที่และพนักงานจริงก่อน แล้วค่อยเริ่มดึงงานของวันที่ล่าสุด
+    loadMetadata(initialName);
   }, []);
 
   const handleAssigneeChange = (newName: string) => {
     setAssignee(newName);
     localStorage.setItem("gds_assignee", newName);
-    fetchTasks(newName, sheetName);
+    if (sheetName) {
+      fetchTasks(newName, sheetName);
+    }
   };
 
   const toggleSelectTask = (key: string) => {
@@ -422,7 +429,9 @@ export default function HomePage() {
                   Graphic Drive Sync
                 </h1>
                 <span className="text-[11px] font-semibold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-200">
-                  {availableSheets.length} วันที่ / {staffList.length} พนักงาน
+                  {availableSheets.length > 0
+                    ? `${availableSheets.length} วันที่ / ${staffList.length} พนักงาน`
+                    : "กำลังดึงข้อมูลชีต..."}
                 </span>
               </div>
               <p className="text-xs text-slate-500">
@@ -507,14 +516,21 @@ export default function HomePage() {
                   setSheetName(e.target.value);
                   fetchTasks(assignee, e.target.value);
                 }}
-                className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-medium"
+                disabled={isMetadataLoading || availableSheets.length === 0}
+                className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-medium disabled:opacity-75 disabled:cursor-not-allowed"
               >
-                {availableSheets.map((s) => (
-                  <option key={s} value={s}>
-                    📅 {s}
-                  </option>
-                ))}
-                <option value="ALL">🔍 ทุกวันที่ (ค้นหางานค้างข้ามแท็บ)</option>
+                {availableSheets.length === 0 ? (
+                  <option value="">⏳ กำลังดึงวันที่จากชีต...</option>
+                ) : (
+                  <>
+                    {availableSheets.map((s) => (
+                      <option key={s} value={s}>
+                        📅 {s}
+                      </option>
+                    ))}
+                    <option value="ALL">🔍 ทุกวันที่ (ค้นหางานค้างข้ามแท็บ)</option>
+                  </>
+                )}
               </select>
             </div>
 
@@ -535,11 +551,17 @@ export default function HomePage() {
             <div className="flex gap-2">
               <button
                 onClick={() => fetchTasks(assignee, sheetName)}
-                disabled={isLoading}
+                disabled={isLoading || isMetadataLoading || !sheetName}
                 className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] rounded-xl shadow-xs transition-all disabled:opacity-60 cursor-pointer"
               >
                 <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
-                <span>{isLoading ? "กำลังค้นหา..." : "ค้นหางานของฉัน"}</span>
+                <span>
+                  {isMetadataLoading
+                    ? "กำลังดึงวันที่..."
+                    : isLoading
+                    ? "กำลังค้นหา..."
+                    : "ค้นหางานของฉัน"}
+                </span>
               </button>
             </div>
           </div>
@@ -697,7 +719,15 @@ export default function HomePage() {
         )}
 
         {/* Task List Grouped by Date */}
-        {isLoading ? (
+        {isMetadataLoading ? (
+          <section className="bg-white rounded-2xl border border-slate-200 p-12 text-center shadow-xs">
+            <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto mb-3 shadow-inner">
+              <RefreshCw className="w-6 h-6 animate-spin" />
+            </div>
+            <h4 className="text-base font-bold text-slate-800">กำลังเชื่อมต่อ Google Sheets...</h4>
+            <p className="text-xs text-slate-400 mt-1">กำลังดึงแท็บวันที่และรายชื่อพนักงานจริงจากชีต กรุณารอสักครู่</p>
+          </section>
+        ) : isLoading ? (
           <section className="bg-white rounded-2xl border border-slate-200 p-12 text-center shadow-xs">
             <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto mb-3 shadow-inner">
               <RefreshCw className="w-6 h-6 animate-spin" />
