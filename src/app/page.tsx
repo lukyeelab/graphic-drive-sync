@@ -25,6 +25,7 @@ import {
   Copy,
   ChevronDown,
   ChevronUp,
+  Loader2,
 } from "lucide-react";
 
 interface Task {
@@ -97,6 +98,8 @@ export default function HomePage() {
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTaskKeys, setSelectedTaskKeys] = useState<string[]>([]);
+  const [syncingTaskKeys, setSyncingTaskKeys] = useState<string[]>([]);
+  const [justCompletedKeys, setJustCompletedKeys] = useState<Set<string>>(new Set());
   const [taskNamesMap, setTaskNamesMap] = useState<Record<string, string>>({});
   const [folderLinksMap, setFolderLinksMap] = useState<
     Record<string, { thUrl?: string; interUrl?: string }>
@@ -144,6 +147,13 @@ export default function HomePage() {
   }, []);
 
   const getTaskKey = (sheet: string, row: number) => `${sheet}_${row}`;
+
+  const cleanStatus = (status?: string): string => {
+    if (!status) return "กำลังทำ";
+    return status
+      .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F1E6}-\u{1F1FF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{2300}-\u{23FF}]/gu, "")
+      .trim();
+  };
 
   const copyToClipboard = (url: string, label: string) => {
     navigator.clipboard.writeText(url);
@@ -615,7 +625,10 @@ export default function HomePage() {
       };
     });
 
+    const keysToSync = selectedTasks.map((t) => getTaskKey(t.sheetName, t.row));
+    setSyncingTaskKeys(keysToSync);
     setIsSyncing(true);
+
     try {
       const res = await fetch("/api/sync", {
         method: "POST",
@@ -631,20 +644,47 @@ export default function HomePage() {
 
         if (result.updatedTasks && Array.isArray(result.updatedTasks)) {
           const newLinks: Record<string, { thUrl?: string; interUrl?: string }> = {};
+          const nextCompleted = new Set(justCompletedKeys);
+
           result.updatedTasks.forEach((u: any) => {
             const key = getTaskKey(u.sheetName, u.row);
             newLinks[key] = {
               thUrl: u.thFolderUrl || "",
               interUrl: u.interFolderUrl || "",
             };
+            nextCompleted.add(key);
           });
 
+          // บันทึกรายการงานที่เพิ่งทำเสร็จ เพื่อไม่ให้แถวหายไปจากตาราง
+          setJustCompletedKeys(nextCompleted);
           setFolderLinksMap((prev) => ({ ...prev, ...newLinks }));
+
+          // อัปเดตงานในตารางทันทีใน Memory เพื่อให้ขึ้นสถานะเสร็จสิ้นและแสดงปุ่มเปิดลิงก์ทันที 0ms
+          setTasks((prevTasks) =>
+            prevTasks.map((t) => {
+              const u = result.updatedTasks.find(
+                (item: any) => item.sheetName === t.sheetName && item.row === t.row
+              );
+              if (u) {
+                return {
+                  ...t,
+                  uploadUrl: u.thFolderUrl || t.uploadUrl,
+                  interFolderUrl: u.interFolderUrl || t.interFolderUrl,
+                  hasUploadLink: !!u.thFolderUrl,
+                  status: "เสร็จสิ้น",
+                  isCompleted: true,
+                };
+              }
+              return t;
+            })
+          );
+
+          // นำงานที่เสร็จแล้วออกจากรายการที่เลือก
+          setSelectedTaskKeys((prev) => prev.filter((k) => !keysToSync.includes(k)));
         }
 
-        // ล้าง Client Cache เพื่อให้ดึงข้อมูลโฟลเดอร์ล่าสุดที่เพิ่งสร้างมาแสดงผล
+        // ล้าง Client Cache เพื่อให้รอบถัดไปดึงข้อมูลใหม่
         clientSheetCacheRef.current = {};
-        fetchTasks(assignee, selectedSheets, true);
       } else {
         alert(result.error || result.message || "เกิดข้อผิดพลาดในการสร้างโฟลเดอร์");
       }
@@ -653,11 +693,14 @@ export default function HomePage() {
       alert("เกิดข้อผิดพลาดในการเชื่อมต่อ");
     } finally {
       setIsSyncing(false);
+      setSyncingTaskKeys([]);
     }
   };
 
   const filteredTasks = tasks.filter((t) => {
-    if (pendingOnly && t.isCompleted) {
+    const key = getTaskKey(t.sheetName, t.row);
+    // หากงานเพิ่งเสร็จในรอบนี้ (justCompletedKeys) ให้แสดงไว้เสมอ ไม่ให้แถวหายไป แม้จะเปิด "เลือกเฉพาะงานที่ยังไม่เสร็จ"
+    if (pendingOnly && t.isCompleted && !justCompletedKeys.has(key)) {
       return false;
     }
     const matchSearch =
@@ -1435,6 +1478,8 @@ const renderDateCheckbox = (s: string) => {
                       {dateTasks.map((task) => {
                         const key = getTaskKey(task.sheetName, task.row);
                         const isSelected = selectedTaskKeys.includes(key);
+                        const isSyncingThis = syncingTaskKeys.includes(key);
+                        const isJustCompleted = justCompletedKeys.has(key);
                         const catStyle = CATEGORY_COLORS[task.category] || {
                           bg: "bg-slate-100",
                           text: "text-slate-700",
@@ -1445,21 +1490,31 @@ const renderDateCheckbox = (s: string) => {
                           <tr
                             key={key}
                             onClick={() => toggleSelectTask(key)}
-                            className={`hover:bg-indigo-50/30 cursor-pointer transition-colors ${
-                              isSelected ? "bg-indigo-50/50" : ""
+                            className={`transition-colors ${
+                              isSyncingThis
+                                ? "bg-indigo-50/70 animate-pulse ring-1 ring-indigo-200"
+                                : isJustCompleted
+                                ? "bg-emerald-50/40 hover:bg-emerald-50/60"
+                                : isSelected
+                                ? "bg-indigo-50/50"
+                                : "hover:bg-indigo-50/30 cursor-pointer"
                             }`}
                           >
                             <td className="py-3 px-4 text-center" onClick={(e) => e.stopPropagation()}>
-                              <button
-                                onClick={() => toggleSelectTask(key)}
-                                className="text-indigo-600 focus:outline-hidden"
-                              >
-                                {isSelected ? (
+                              {isSyncingThis ? (
+                                <Loader2 className="w-5 h-5 text-indigo-600 animate-spin mx-auto" />
+                              ) : (
+                                <button
+                                  onClick={() => toggleSelectTask(key)}
+                                  className="text-indigo-600 focus:outline-hidden"
+                                >
+                                  {isSelected ? (
                                     <CheckSquare className="w-5 h-5 text-indigo-600" />
-                                ) : (
-                                  <Square className="w-5 h-5 text-slate-300 hover:text-slate-400" />
-                                )}
-                              </button>
+                                  ) : (
+                                    <Square className="w-5 h-5 text-slate-300 hover:text-slate-400" />
+                                  )}
+                                </button>
+                              )}
                             </td>
                             <td className="py-3 px-3 text-center text-xs font-mono text-slate-400">
                               #{task.row}
@@ -1524,7 +1579,12 @@ const renderDateCheckbox = (s: string) => {
                               </div>
                             </td>
                             <td className="py-3 px-3 text-center whitespace-nowrap">
-                              {task.isCompleted ? (
+                              {isSyncingThis ? (
+                                <span className="inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-indigo-100 text-indigo-800 border border-indigo-200 shadow-2xs">
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0 text-indigo-600" />
+                                  <span>กำลังสร้าง...</span>
+                                </span>
+                              ) : task.isCompleted ? (
                                 <span className="inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-2xs">
                                   <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
                                   <span>เสร็จสิ้น</span>
@@ -1532,7 +1592,7 @@ const renderDateCheckbox = (s: string) => {
                               ) : (
                                 <span className="inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-amber-50 text-amber-700 border border-amber-200 shadow-2xs">
                                   <Clock className="w-3.5 h-3.5 shrink-0" />
-                                  <span>{task.status || "กำลังทำ"}</span>
+                                  <span>{cleanStatus(task.status) || "กำลังทำ"}</span>
                                 </span>
                               )}
                             </td>
@@ -1542,6 +1602,15 @@ const renderDateCheckbox = (s: string) => {
                                 // อ้างอิงลิงก์จริงจาก Google Sheets เป็นหลัก 100% ไม่สร้างลิงก์หลอก และไม่ดึงลิงก์โฟลเดอร์ที่ถูกลบไปแล้วกลับมา
                                 const thUrl = (linkInfo?.thUrl || task.uploadUrl || "").trim();
                                 const interUrl = (linkInfo?.interUrl || task.interFolderUrl || "").trim();
+
+                                if (isSyncingThis) {
+                                  return (
+                                    <span className="inline-flex items-center justify-center gap-1.5 text-xs font-bold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-200 shadow-2xs">
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600 shrink-0" />
+                                      <span>กำลังสร้างโฟลเดอร์...</span>
+                                    </span>
+                                  );
+                                }
 
                                 if (!thUrl && !interUrl) {
                                   if (task.isCompleted) {

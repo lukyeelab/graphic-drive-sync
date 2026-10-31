@@ -1358,11 +1358,10 @@ function writeSmartChipsBatchToSheet(spreadsheetId, sheet, updates) {
                   }
                 }
               }
-            ],
-            textFormatRuns: []
+            ]
           }]
         }],
-        fields: "userEnteredValue,chipRuns,textFormatRuns"
+        fields: "userEnteredValue,chipRuns"
       }
     };
   });
