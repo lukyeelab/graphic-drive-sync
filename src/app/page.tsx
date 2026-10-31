@@ -1813,7 +1813,7 @@ const renderDateCheckbox = (s: string) => {
                                         className="inline-flex items-center gap-1 text-[11px] font-bold text-white bg-[#264D34] hover:bg-[#1C3A27] active:scale-95 border border-[#20402C] px-2.5 py-1 rounded-xl transition-all shadow-xs hover:scale-102 group whitespace-nowrap"
                                         title="คลิกเพื่อเปิดโฟลเดอร์ Google Drive (TH)"
                                       >
-                                        <span>เปิด TH</span>
+                                        <span>TH</span>
                                         <ExternalLink className="w-3 h-3 text-[#A8DFB8] group-hover:text-white shrink-0" />
                                       </a>
                                     ) : (
@@ -1833,7 +1833,7 @@ const renderDateCheckbox = (s: string) => {
                                         className="inline-flex items-center gap-1 text-[11px] font-bold text-white bg-[#253A4D] hover:bg-[#1B2B3A] active:scale-95 border border-[#1E2E3D] px-2.5 py-1 rounded-xl transition-all shadow-xs hover:scale-102 group whitespace-nowrap"
                                         title="คลิกเพื่อเปิดโฟลเดอร์ Google Drive (INTER)"
                                       >
-                                        <span>เปิด INTER</span>
+                                        <span>INTER</span>
                                         <ExternalLink className="w-3 h-3 text-[#B0D3F5] group-hover:text-white shrink-0" />
                                       </a>
                                     ) : null}
