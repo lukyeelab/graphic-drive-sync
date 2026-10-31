@@ -758,6 +758,21 @@ function getMonthlyRootFolders(sheet) {
   const ss = sheet.getParent();
   const ssId = ss.getId();
   const sheetName = sheet.getName();
+  const cache = CacheService.getScriptCache();
+  const cacheKey = "ROOT_FOLDERS_" + Utilities.base64EncodeWebSafe(sheetName).slice(0, 50);
+
+  // ตรวจสอบจาก Cache ก่อนเพื่อความรวดเร็ว 0ms
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    try {
+      const parsed = JSON.parse(cached);
+      const thF = parsed.thId ? DriveApp.getFolderById(parsed.thId) : null;
+      const interF = parsed.interId ? DriveApp.getFolderById(parsed.interId) : null;
+      if (thF && !thF.isTrashed()) {
+        return { thFolder: thF, interFolder: interF };
+      }
+    } catch (e) {}
+  }
 
   let thFolder = null;
   let interFolder = null;
@@ -842,6 +857,16 @@ function getMonthlyRootFolders(sheet) {
     const f3Val = sheet.getRange(3, 6).getValue() || "";
     throw new Error(`ไม่พบโฟลเดอร์ Google Drive ของ TH ในช่อง F3 (ค่าในช่องคือ "${f3Val}") กรุณาตรวจสอบว่ามีโฟลเดอร์ชื่อ M11 หรือ ใบขาย พ.ย. NOV 69 ใน Google Drive`);
   }
+
+  // บันทึกใส่ Cache 6 ชั่วโมงเพื่อให้รอบต่อไปเร็วทันใจ 0ms
+  try {
+    cache.put(cacheKey, JSON.stringify({
+      thId: thFolder.getId(),
+      interId: interFolder ? interFolder.getId() : ""
+    }), 21600);
+  } catch (e) {}
+
+  return { thFolder: thFolder, interFolder: interFolder };
 
   return { thFolder: thFolder, interFolder: interFolder };
 }
@@ -1328,147 +1353,58 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force) {
 }
 
 /**
- * ฟังก์ชันช่วยเขียน Smart Chip แท้ๆ (Google Drive Chip) + Note + เปลี่ยนสถานะ ลงใน Google Sheets ด้วย Sheets API v4
+ * ฟังก์ชันช่วยเขียนลิงก์โฟลเดอร์ TH + Note ลิงก์ INTER + สถานะเสร็จสิ้น ลงใน Google Sheets อย่างแม่นยำและรวดเร็ว
  */
 function writeSmartChipsBatchToSheet(spreadsheetId, sheet, updates) {
   if (!updates || updates.length === 0) return { success: false, error: "No updates" };
-  const sheetId = sheet.getSheetId();
 
-  // 1. สร้าง Requests สำหรับเขียน Smart Chip (chipRuns) โดยเฉพาะ โดยไม่ปะปนกับช่องสถานะหรือช่องอื่น
-  const chipRequests = updates.map(function(u) {
-    const rowIndex = u.row - 1; // 0-based index สำหรับ Sheets API v4
-    return {
-      updateCells: {
-        range: {
-          sheetId: sheetId,
-          startRowIndex: rowIndex,
-          endRowIndex: rowIndex + 1,
-          startColumnIndex: CONFIG.COL_UPLOAD_LINK - 1,
-          endColumnIndex: CONFIG.COL_UPLOAD_LINK
-        },
-        rows: [{
-          values: [{
-            userEnteredValue: { stringValue: "@" },
-            chipRuns: [
-              {
-                startIndex: 0,
-                chip: {
-                  richLinkProperties: {
-                    uri: u.thUrl
-                  }
-                }
-              }
-            ]
-          }]
-        }],
-        fields: "userEnteredValue,chipRuns"
-      }
-    };
-  });
-
-  let apiSuccess = false;
-  let errorDetail = "";
-  let successMethod = "";
-
-  // ขั้นตอนที่ 1: ยิงผ่าน Google Sheets Advanced Service (หากผู้ใช้เปิดใช้ Service Sheets ใน Apps Script)
-  if (typeof Sheets !== "undefined" && Sheets.Spreadsheets && Sheets.Spreadsheets.batchUpdate) {
-    try {
-      Sheets.Spreadsheets.batchUpdate({ requests: chipRequests }, spreadsheetId);
-      apiSuccess = true;
-      successMethod = "Sheets.Spreadsheets.batchUpdate";
-      Logger.log("เขียน Smart Chip ผ่าน Sheets Advanced Service สำเร็จ");
-    } catch (eSheets) {
-      errorDetail += "SheetsService: " + eSheets.message + "; ";
-      Logger.log("Sheets.Spreadsheets.batchUpdate error: " + eSheets.message);
-    }
-  } else {
-    errorDetail += "SheetsService: undefined; ";
-  }
-
-  // ขั้นตอนที่ 2: หากไม่มี Advanced Service หรือยิงไม่ผ่าน ให้ยิงผ่าน REST API (UrlFetchApp) ด้วย OAuth Token
-  if (!apiSuccess) {
-    try {
-      const token = ScriptApp.getOAuthToken();
-      const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`;
-      const res = UrlFetchApp.fetch(apiUrl, {
-        method: "post",
-        contentType: "application/json",
-        headers: { "Authorization": "Bearer " + token },
-        payload: JSON.stringify({ requests: chipRequests }),
-        muteHttpExceptions: true
-      });
-      if (res.getResponseCode() === 200) {
-        apiSuccess = true;
-        successMethod = "UrlFetchApp";
-        Logger.log("เขียน Smart Chip ผ่าน UrlFetchApp Sheets API v4 สำเร็จ");
-      } else {
-        errorDetail += `UrlFetchApp (${res.getResponseCode()}): ${res.getContentText()}; `;
-        Logger.log("UrlFetchApp batchUpdate response " + res.getResponseCode() + ": " + res.getContentText());
-      }
-    } catch (eFetch) {
-      errorDetail += "UrlFetchApp: " + eFetch.message + "; ";
-      Logger.log("UrlFetchApp batchUpdate error: " + eFetch.message);
-    }
-  }
-
-  // Fallback: หากทั้งสองทางด้านบนไม่สำเร็จ ให้วาง RichText Hyperlink เพื่อไม่ให้งานสะดุด
-  if (!apiSuccess) {
-    Logger.log("จำเป็นต้องใช้ Fallback วาง RichText Hyperlink แทน: " + errorDetail);
-    for (let i = 0; i < updates.length; i++) {
-      const u = updates[i];
-      try {
-        const cellF = sheet.getRange(u.row, CONFIG.COL_UPLOAD_LINK);
-
-        // กำหนดรูปแบบตัวหนังสือ: ไม่ใส่เส้นใต้ และใช้สีดำเดิมตามเซลล์
-        const textStyle = SpreadsheetApp.newTextStyle()
-          .setUnderline(false)
-          .setForegroundColor("#000000")
-          .build();
-
-        const richValue = SpreadsheetApp.newRichTextValue()
-          .setText(u.taskName)
-          .setLinkUrl(u.thUrl)
-          .setTextStyle(textStyle)
-          .build();
-
-        cellF.setRichTextValue(richValue);
-      } catch (eRich) {
-        Logger.log(`ตั้งค่า RichText แถว ${u.row} ไม่สำเร็จ: ${eRich.message}`);
-      }
-    }
-  }
-
-  // ขั้นตอนที่ 3: ปรับรูปแบบเซลล์ไม่ให้มีเส้นใต้, สีตัวหนังสือดำ, ตั้งค่า Note และเปลี่ยนสถานะ Col L
   for (let i = 0; i < updates.length; i++) {
     const u = updates[i];
-    const cellF = sheet.getRange(u.row, CONFIG.COL_UPLOAD_LINK);
-
-    // บังคับรูปแบบเซลล์: ไม่ใส่เส้นใต้ และใช้สีตัวหนังสือสีดำ/สีเดิมตามเซลล์
     try {
-      cellF.setFontLine("none");
-      cellF.setFontColor("#000000");
-    } catch (eFmt) {}
+      const cellF = sheet.getRange(u.row, CONFIG.COL_UPLOAD_LINK);
 
-    if (u.interUrl) {
-      try {
-        cellF.setNote(`INTER: ${u.interUrl}`);
-      } catch (eNote) {
-        Logger.log(`ตั้งค่า Note แถว ${u.row} ไม่สำเร็จ: ${eNote.message}`);
+      // สร้าง RichText Hyperlink ที่ชี้ไปยัง u.thUrl โดยคงชื่องานเดิมไว้ครบถ้วน
+      if (u.thUrl) {
+        const richValue = SpreadsheetApp.newRichTextValue()
+          .setText(u.taskName || `งานแถวที่ ${u.row}`)
+          .setLinkUrl(u.thUrl)
+          .build();
+        cellF.setRichTextValue(richValue);
+      } else if (u.taskName) {
+        cellF.setValue(u.taskName);
       }
-    }
 
-    const cellL = sheet.getRange(u.row, CONFIG.COL_STATUS);
-    try {
-      cellL.setValue("เสร็จสิ้น");
-    } catch (e1) {
-      Logger.log(`ตั้งค่าสถานะแถว ${u.row} ไม่สำเร็จ: ${e1.message}`);
+      // บังคับรูปแบบตัวหนังสือ: ไม่ใส่เส้นใต้ และใช้สีดำเดิมตามเซลล์
+      try {
+        cellF.setFontLine("none");
+        cellF.setFontColor("#000000");
+      } catch (eFmt) {}
+
+      // บันทึกลิงก์ของ INTER ลงใน Note ของเซลล์ Col F
+      if (u.interUrl) {
+        try {
+          cellF.setNote(`INTER: ${u.interUrl}`);
+        } catch (eNote) {
+          Logger.log(`ตั้งค่า Note แถว ${u.row} ไม่สำเร็จ: ${eNote.message}`);
+        }
+      }
+
+      // ปรับสถานะใน Col L เป็น "เสร็จสิ้น" (ไม่มีอีโมจิ)
+      const cellL = sheet.getRange(u.row, CONFIG.COL_STATUS);
+      try {
+        cellL.setValue("เสร็จสิ้น");
+      } catch (e1) {
+        Logger.log(`ตั้งค่าสถานะแถว ${u.row} ไม่สำเร็จ: ${e1.message}`);
+      }
+    } catch (e) {
+      Logger.log(`อัปเดตเซลล์แถว ${u.row} ไม่สำเร็จ: ${e.message}`);
     }
   }
 
   return {
-    success: apiSuccess,
-    method: successMethod,
-    error: errorDetail
+    success: true,
+    method: "RichText",
+    error: ""
   };
 }
 
@@ -1620,6 +1556,8 @@ function createFoldersAndSyncBatch(payload) {
 
     const sheetTasks = grouped[sName];
     const sheetUpdates = [];
+    const thCatFolderCache = {};
+    const interCatFolderCache = {};
 
     for (let t = 0; t < sheetTasks.length; t++) {
       const task = sheetTasks[t];
@@ -1628,19 +1566,27 @@ function createFoldersAndSyncBatch(payload) {
       const taskName = task.taskName || `${task.no || 1}_${catInfo.thTarget}`;
       const row = task.row;
 
-      // 3. หมวดหมู่ฝั่ง TH (ตรวจจับคำผิด เช่น สล๊อต vs สล็อต, คาสิโน่ vs คาสิโน)
-      const thCatFolder = getOrCreateFolderSmart(thDateFolder, catInfo.thTarget, [rawCategory, catInfo.interTarget], {
-        isCategory: true,
-        keywords: catInfo.keywords
-      });
-
-      // 4. หมวดหมู่ฝั่ง INTER (ตรวจจับชื่อย่อหรือชื่อภาษาไทยที่คนก๊อปปี้ไปวาง)
-      let interCatFolder = null;
-      if (interDateFolder) {
-        interCatFolder = getOrCreateFolderSmart(interDateFolder, catInfo.interTarget, [catInfo.thTarget, rawCategory], {
+      // 3. หมวดหมู่ฝั่ง TH (แคชเพื่อความเร็วระดับมิลลิวินาที)
+      let thCatFolder = thCatFolderCache[catInfo.thTarget];
+      if (!thCatFolder) {
+        thCatFolder = getOrCreateFolderSmart(thDateFolder, catInfo.thTarget, [rawCategory, catInfo.interTarget], {
           isCategory: true,
           keywords: catInfo.keywords
         });
+        thCatFolderCache[catInfo.thTarget] = thCatFolder;
+      }
+
+      // 4. หมวดหมู่ฝั่ง INTER (แคชเพื่อความเร็วระดับมิลลิวินาที)
+      let interCatFolder = null;
+      if (interDateFolder) {
+        interCatFolder = interCatFolderCache[catInfo.interTarget];
+        if (!interCatFolder) {
+          interCatFolder = getOrCreateFolderSmart(interDateFolder, catInfo.interTarget, [catInfo.thTarget, rawCategory], {
+            isCategory: true,
+            keywords: catInfo.keywords
+          });
+          interCatFolderCache[catInfo.interTarget] = interCatFolder;
+        }
       }
 
       // 5. โฟลเดอร์งานฝั่ง TH: ตรวจสอบว่ามีโฟลเดอร์เดิมอยู่แล้วหรือไม่ (เพื่อเปลี่ยนชื่อแทนการสร้างใหม่ซ้ำซ้อน)
@@ -1660,7 +1606,6 @@ function createFoldersAndSyncBatch(payload) {
           const existingF = DriveApp.getFolderById(existingThFolderId);
           if (existingF && !existingF.isTrashed()) {
             thTaskFolder = existingF;
-            // ถ้าชื่อโฟลเดอร์เดิมไม่ตรงกับชื่องานใหม่ ให้เปลี่ยนชื่อโฟลเดอร์เดิมทันที (ไม่สร้างโฟลเดอร์ใหม่ซ้ำ!)
             if (thTaskFolder.getName() !== taskName.trim()) {
               thTaskFolder.setName(taskName.trim());
             }
@@ -1683,7 +1628,7 @@ function createFoldersAndSyncBatch(payload) {
           try { thTaskFolder.setName(taskName.trim()); } catch (e) {}
         }
       }
-      const thUrl = thTaskFolder.getUrl();
+      const thUrl = thTaskFolder ? thTaskFolder.getUrl() : "";
 
       // 6. โฟลเดอร์งานฝั่ง INTER: ตรวจสอบและเปลี่ยนชื่อโฟลเดอร์เดิมหากมีอยู่แล้ว
       let interUrl = "";
@@ -1724,7 +1669,7 @@ function createFoldersAndSyncBatch(payload) {
             try { interTaskFolder.setName(interTaskName.trim()); } catch (e) {}
           }
         }
-        interUrl = interTaskFolder.getUrl();
+        interUrl = interTaskFolder ? interTaskFolder.getUrl() : "";
       }
 
       sheetUpdates.push({
@@ -1790,6 +1735,9 @@ function doGet(e) {
       const rowsParam = e.parameter.rows || "";
       const rows = rowsParam ? rowsParam.split(",").map(Number).filter(Boolean) : [];
       data = convertSheetLinksToSmartChips(sheetName, rows);
+    } else if (action === "repairLinks") {
+      const sheetName = e.parameter.sheet || "";
+      data = repairMissingThLinks(sheetName);
     } else {
       data = { success: false, error: "Invalid action" };
     }
@@ -1806,6 +1754,86 @@ function doGet(e) {
   }
 }
 
+/**
+ * ซ่อมแซมลิงก์ TH ที่หายไปในแถวที่มีชื่องานหรือมีลิงก์ INTER อยู่แล้ว
+ */
+function repairMissingThLinks(sheetName) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = sheetName ? ss.getSheetByName(sheetName) : ss.getActiveSheet();
+  if (!sheet) return { success: false, error: "ไม่พบแผ่นงาน: " + sheetName };
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < CONFIG.DATA_START_ROW) {
+    return { success: true, count: 0, message: "ไม่มีข้อมูลงาน" };
+  }
+
+  const { thFolder } = getMonthlyRootFolders(sheet);
+  const dateInfo = parseDateFormats(sheet.getName());
+  const thDateAliases = [sheet.getName(), `${dateInfo.dayNumber} พ.ย. 69`, `${dateInfo.padDay} พย 69`];
+  const thDateFolder = getOrCreateFolderSmart(thFolder, dateInfo.thFolderName, thDateAliases, {
+    isDate: true,
+    dayNumber: dateInfo.dayNumber,
+    monthKeywords: [dateInfo.thMonth, "พย", "พ.ย."]
+  });
+
+  const updates = [];
+  const thCatCache = {};
+
+  let currentCategory = "";
+  for (let r = CONFIG.DATA_START_ROW; r <= lastRow; r++) {
+    const catVal = sheet.getRange(r, CONFIG.COL_CATEGORY_NAME).getValue();
+    if (catVal && catVal.toString().trim() !== "") {
+      currentCategory = catVal.toString().trim();
+    }
+
+    const cellF = sheet.getRange(r, CONFIG.COL_UPLOAD_LINK);
+    const text = (cellF.getValue() || "").toString().trim();
+    const note = cellF.getNote() || "";
+    const rich = cellF.getRichTextValue();
+    const hasLink = (rich && rich.getLinkUrl()) || (cellF.getFormula() && cellF.getFormula().includes("HYPERLINK"));
+
+    // หากมีชื่องาน หรือมี Note INTER แต่ยังไม่มีลิงก์ TH ให้ค้นหาโฟลเดอร์ TH ที่มีอยู่แล้วมาซ่อมแซม
+    if (text && (!hasLink || !rich?.getLinkUrl())) {
+      const catInfo = getCategoryInfoSmart(currentCategory || "ทั่วไป");
+      let thCat = thCatCache[catInfo.thTarget];
+      if (!thCat) {
+        thCat = getOrCreateFolderSmart(thDateFolder, catInfo.thTarget, [currentCategory], { isCategory: true, keywords: catInfo.keywords });
+        thCatCache[catInfo.thTarget] = thCat;
+      }
+
+      if (thCat) {
+        const noVal = sheet.getRange(r, CONFIG.COL_NO).getValue() || "";
+        const existingTaskF = getOrCreateFolderSmart(thCat, text, [text, `${noVal}`, `${noVal}_${catInfo.thTarget}`], { taskNo: noVal });
+        if (existingTaskF) {
+          const noteMatch = note.match(/INTER:\s*(https:\/\/[^\s]+)/i);
+          updates.push({
+            row: r,
+            taskName: text,
+            thUrl: existingTaskF.getUrl(),
+            interUrl: noteMatch ? noteMatch[1].trim() : ""
+          });
+        }
+      }
+    }
+  }
+
+  if (updates.length > 0) {
+    writeSmartChipsBatchToSheet(ss.getId(), sheet, updates);
+    try {
+      const scriptCache = CacheService.getScriptCache();
+      const cKey = "FAST_TASKS_V3_" + Utilities.base64EncodeWebSafe(sheet.getName()).slice(0, 50);
+      scriptCache.remove(cKey);
+    } catch (e) {}
+  }
+
+  return {
+    success: true,
+    message: `ซ่อมแซมและกู้คืนลิงก์ TH สำเร็จ ${updates.length} รายการ`,
+    count: updates.length,
+    updates: updates
+  };
+}
+
 function doPost(e) {
   try {
     const postData = JSON.parse(e.postData.contents);
@@ -1816,6 +1844,8 @@ function doPost(e) {
       data = createFoldersAndSyncBatch(postData);
     } else if (action === "fixSmartChips") {
       data = convertSheetLinksToSmartChips(postData.sheetName, postData.rows);
+    } else if (action === "repairLinks") {
+      data = repairMissingThLinks(postData.sheetName);
     } else {
       data = { success: false, error: "Invalid POST action" };
     }

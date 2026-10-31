@@ -604,7 +604,7 @@ export default function HomePage() {
 
     for (const t of selectedTasks) {
       const key = getTaskKey(t.sheetName, t.row);
-      const name = (taskNamesMap[key] || "").trim();
+      const name = (taskNamesMap[key] || t.taskName || "").trim();
       if (!name) {
         alert(
           `กรุณากรอก "ชื่องาน/ชื่อโฟลเดอร์" สำหรับงานแถว #${t.row} (หมวด ${t.category} งานที่ ${t.no}) ก่อนกดสร้างโฟลเดอร์ครับ`
@@ -620,7 +620,7 @@ export default function HomePage() {
         row: t.row,
         category: t.category,
         no: t.no,
-        taskName: taskNamesMap[key].trim(),
+        taskName: (taskNamesMap[key] || t.taskName || "").trim(),
         existingUrl: t.uploadUrl || folderLinksMap[key]?.thUrl || "",
       };
     });
@@ -1659,7 +1659,14 @@ const renderDateCheckbox = (s: string) => {
                                         <span>เปิด TH</span>
                                         <ExternalLink className="w-3 h-3 text-[#34603B] group-hover:text-[#234428] shrink-0" />
                                       </a>
-                                    ) : null}
+                                    ) : (
+                                      <span
+                                        className="text-[10px] text-[#8C3A27] bg-[#F8EFEA] px-2 py-0.5 rounded-lg border border-[#EACEC3] font-medium"
+                                        title="ติ๊กเลือกแถวนี้แล้วกดปุ่มสร้างโฟลเดอร์ด้านล่างเพื่อดึงลิงก์ TH"
+                                      >
+                                        รอเชื่อม TH
+                                      </span>
+                                    )}
 
                                     {interUrl ? (
                                       <a

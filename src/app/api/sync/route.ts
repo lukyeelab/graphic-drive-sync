@@ -65,6 +65,17 @@ export async function POST(req: NextRequest) {
         );
       }
 
+      if (responseText.includes("ppConfig") || responseText.includes("<!DOCTYPE html>")) {
+        return NextResponse.json(
+          {
+            success: false,
+            message:
+              "Google Apps Script ใช้เวลาประมวลผลนานเกินกำหนด (Timeout) หรือโค้ดใน Apps Script ยังเป็นเวอร์ชันเก่า โปรดคัดลอกไฟล์ Code.gs ล่าสุดไปวางใน Google Apps Script แล้วกด Deploy New version",
+          },
+          { status: 502 }
+        );
+      }
+
       return NextResponse.json(
         {
           success: false,
