@@ -134,27 +134,22 @@ export default function HomePage() {
   const dateDropdownRef = useRef<HTMLDivElement>(null);
   const [isDateDropdownOpen, setIsDateDropdownOpen] = useState<boolean>(false);
 
-  // การนับถอยหลังและการยกเลิกสร้างโฟลเดอร์
-  const [syncCountdown, setSyncCountdown] = useState<number | null>(null);
-  const syncCountdownTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // การยกเลิกสร้างโฟลเดอร์
   const syncAbortControllerRef = useRef<AbortController | null>(null);
 
-  // ดักจับปุ่ม Esc เพื่อกดยกเลิกการสร้างโฟลเดอร์ทันที
+  // ดักจับปุ่ม Esc เพื่อกดยกเลิกขณะกำลังสร้างโฟลเดอร์ทันที
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && (syncCountdown !== null || isSyncing)) {
+      if (e.key === "Escape" && isSyncing) {
         handleCancelSync();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [syncCountdown, isSyncing]);
+  }, [isSyncing]);
 
   useEffect(() => {
     return () => {
-      if (syncCountdownTimerRef.current) {
-        clearInterval(syncCountdownTimerRef.current);
-      }
       if (syncAbortControllerRef.current) {
         syncAbortControllerRef.current.abort();
       }
@@ -652,14 +647,8 @@ export default function HomePage() {
     }
   };
 
-  // ยกเลิกการสร้างโฟลเดอร์ทันที (ทั้งระหว่างนับถอยหลังและระหว่างกำลังเชื่อมต่อ)
+  // ยกเลิกการสร้างโฟลเดอร์ทันทีก่อนเสร็จสิ้น
   const handleCancelSync = () => {
-    if (syncCountdownTimerRef.current) {
-      clearInterval(syncCountdownTimerRef.current);
-      syncCountdownTimerRef.current = null;
-    }
-    setSyncCountdown(null);
-
     if (syncAbortControllerRef.current) {
       syncAbortControllerRef.current.abort();
       syncAbortControllerRef.current = null;
@@ -668,9 +657,12 @@ export default function HomePage() {
     setSyncingTaskKeys([]);
   };
 
-  // ดำเนินการสร้างโฟลเดอร์จริง
-  const executeSyncFolders = async () => {
-    if (selectedTaskKeys.length === 0) return;
+  // ดำเนินการสร้างโฟลเดอร์ทันที (ไม่มีการนับถอยหลัง)
+  const handleSyncFolders = async () => {
+    if (selectedTaskKeys.length === 0) {
+      alert("กรุณาเลือกงานอย่างน้อย 1 รายการเพื่อสร้างโฟลเดอร์");
+      return;
+    }
 
     const selectedTasks = tasks.filter((t) =>
       selectedTaskKeys.includes(getTaskKey(t.sheetName, t.row))
@@ -787,45 +779,6 @@ export default function HomePage() {
       setSyncingTaskKeys([]);
       syncAbortControllerRef.current = null;
     }
-  };
-
-  // เริ่มนับถอยหลัง 3 วินาที เพื่อให้มีโอกาสกดยกเลิกหากเผลอกดผิด
-  const handleStartSyncCountdown = () => {
-    if (selectedTaskKeys.length === 0) {
-      alert("กรุณาเลือกงานอย่างน้อย 1 รายการเพื่อสร้างโฟลเดอร์");
-      return;
-    }
-
-    if (syncCountdownTimerRef.current) {
-      clearInterval(syncCountdownTimerRef.current);
-    }
-
-    let count = 3;
-    setSyncCountdown(count);
-
-    syncCountdownTimerRef.current = setInterval(() => {
-      count -= 1;
-      if (count <= 0) {
-        if (syncCountdownTimerRef.current) {
-          clearInterval(syncCountdownTimerRef.current);
-          syncCountdownTimerRef.current = null;
-        }
-        setSyncCountdown(null);
-        executeSyncFolders();
-      } else {
-        setSyncCountdown(count);
-      }
-    }, 1000);
-  };
-
-  // ข้ามเวลานับถอยหลังแล้วเริ่มสร้างทันที
-  const handleImmediateSync = () => {
-    if (syncCountdownTimerRef.current) {
-      clearInterval(syncCountdownTimerRef.current);
-      syncCountdownTimerRef.current = null;
-    }
-    setSyncCountdown(null);
-    executeSyncFolders();
   };
 
   const filteredTasks = tasks.filter((t) => {
@@ -1781,35 +1734,7 @@ const renderDateCheckbox = (s: string) => {
 
       {/* Modern Floating Bottom Action Bar */}
       <aside className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 w-[95%] max-w-3xl bg-[#FDFBF7]/95 backdrop-blur-md border border-[#E6E1D7] py-2.5 px-4 rounded-2xl shadow-xl shadow-[#2D2A26]/5 transition-all">
-        {syncCountdown !== null ? (
-          // สถานะนับถอยหลัง 3 วินาที (สามารถกดยกเลิกได้ก่อนสร้างจริงหากเผลอกดผิด)
-          <div className="flex items-center justify-between flex-wrap gap-2 w-full">
-            <div className="flex items-center gap-2.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-[#8C3A27] animate-ping" />
-              <span className="text-xs sm:text-sm font-bold text-[#2D2A26]">
-                กำลังจะเริ่มสร้างใน <span className="text-[#8C3A27] text-base font-black px-0.5">{syncCountdown}</span> วินาที... ({selectedTaskKeys.length} งาน)
-              </span>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleCancelSync}
-                className="px-4 py-2 text-xs sm:text-sm font-bold text-[#8C3A27] bg-[#FAF0ED] hover:bg-[#F5DFD8] active:scale-95 border border-[#EED0C8] rounded-xl transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-2xs"
-                title="กดยกเลิก หรือกดปุ่ม Esc บนแป้นพิมพ์"
-              >
-                <X className="w-4 h-4 text-[#8C3A27]" />
-                <span>ยกเลิก (Esc)</span>
-              </button>
-              <button
-                onClick={handleImmediateSync}
-                className="px-4 py-2 text-xs sm:text-sm font-bold text-white bg-[#8C3A27] hover:bg-[#783020] active:scale-95 rounded-xl transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-sm shadow-[#8C3A27]/20"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-[#F5C4B8]" />
-                <span>สร้างทันที</span>
-              </button>
-            </div>
-          </div>
-        ) : isSyncing ? (
+        {isSyncing ? (
           // สถานะกำลังส่งคำขอสร้างโฟลเดอร์ (มีปุ่มยกเลิกการส่งคำขอ)
           <div className="flex items-center justify-between flex-wrap gap-2 w-full">
             <div className="flex items-center gap-2.5">
@@ -1821,11 +1746,11 @@ const renderDateCheckbox = (s: string) => {
 
             <button
               onClick={handleCancelSync}
-              className="px-3.5 py-1.5 text-xs sm:text-sm font-bold text-[#8C3A27] bg-[#FAF0ED] hover:bg-[#F5DFD8] active:scale-95 border border-[#EED0C8] rounded-xl transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-2xs"
-              title="ยกเลิกการส่งคำขอ"
+              className="px-4 py-2 text-xs sm:text-sm font-bold text-[#8C3A27] bg-[#FAF0ED] hover:bg-[#F5DFD8] active:scale-95 border border-[#EED0C8] rounded-xl transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-2xs"
+              title="ยกเลิกการสร้างโฟลเดอร์ หรือกดปุ่ม Esc"
             >
               <X className="w-4 h-4 text-[#8C3A27]" />
-              <span>ยกเลิก</span>
+              <span>ยกเลิก (Esc)</span>
             </button>
           </div>
         ) : (
@@ -1845,7 +1770,7 @@ const renderDateCheckbox = (s: string) => {
             </div>
 
             <button
-              onClick={handleStartSyncCountdown}
+              onClick={handleSyncFolders}
               disabled={selectedTaskKeys.length === 0}
               className="inline-flex items-center justify-center gap-2 px-5 py-2 text-xs sm:text-sm font-bold text-[#FDFCFB] bg-[#8C3A27] hover:bg-[#783020] active:scale-[0.98] rounded-xl shadow-sm shadow-[#8C3A27]/20 disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer"
             >
