@@ -134,6 +134,33 @@ export default function HomePage() {
   const dateDropdownRef = useRef<HTMLDivElement>(null);
   const [isDateDropdownOpen, setIsDateDropdownOpen] = useState<boolean>(false);
 
+  // การนับถอยหลังและการยกเลิกสร้างโฟลเดอร์
+  const [syncCountdown, setSyncCountdown] = useState<number | null>(null);
+  const syncCountdownTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const syncAbortControllerRef = useRef<AbortController | null>(null);
+
+  // ดักจับปุ่ม Esc เพื่อกดยกเลิกการสร้างโฟลเดอร์ทันที
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && (syncCountdown !== null || isSyncing)) {
+        handleCancelSync();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [syncCountdown, isSyncing]);
+
+  useEffect(() => {
+    return () => {
+      if (syncCountdownTimerRef.current) {
+        clearInterval(syncCountdownTimerRef.current);
+      }
+      if (syncAbortControllerRef.current) {
+        syncAbortControllerRef.current.abort();
+      }
+    };
+  }, []);
+
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (
@@ -625,23 +652,30 @@ export default function HomePage() {
     }
   };
 
-  // สร้างโฟลเดอร์ TH & INTER และอัปเดตชีต
-  const handleSyncFolders = async () => {
-    if (selectedTaskKeys.length === 0) {
-      alert("กรุณาเลือกงานอย่างน้อย 1 รายการเพื่อสร้างโฟลเดอร์");
-      return;
+  // ยกเลิกการสร้างโฟลเดอร์ทันที (ทั้งระหว่างนับถอยหลังและระหว่างกำลังเชื่อมต่อ)
+  const handleCancelSync = () => {
+    if (syncCountdownTimerRef.current) {
+      clearInterval(syncCountdownTimerRef.current);
+      syncCountdownTimerRef.current = null;
     }
+    setSyncCountdown(null);
 
-    // ตรวจสอบว่ากรอกชื่องานครบทุกงานที่เลือกหรือยัง
+    if (syncAbortControllerRef.current) {
+      syncAbortControllerRef.current.abort();
+      syncAbortControllerRef.current = null;
+    }
+    setIsSyncing(false);
+    setSyncingTaskKeys([]);
+  };
+
+  // ดำเนินการสร้างโฟลเดอร์จริง
+  const executeSyncFolders = async () => {
+    if (selectedTaskKeys.length === 0) return;
+
     const selectedTasks = tasks.filter((t) =>
       selectedTaskKeys.includes(getTaskKey(t.sheetName, t.row))
     );
 
-    // เตรียมข้อมูลงานที่จะส่งไปสร้าง/เชื่อมโยงโฟลเดอร์
-    // รองรับ 3 กรณี:
-    // 1. มีลิงก์เดิมอยู่แล้ว + ผู้ใช้พิมพ์แก้ชื่อใหม่ -> สั่งเปลี่ยนชื่อโฟลเดอร์ใน Drive และอัปเดตชีต (isRename = true)
-    // 2. ไม่มีลิงก์ในชีต + ผู้ใช้พิมพ์ชื่อเข้ามาเอง -> ตั้งชื่อตามที่พิมพ์ (isCustomName = true)
-    // 3. ไม่มีลิงก์ในชีต + ช่องชื่องานว่างเปล่า -> ให้ค้นหาโฟลเดอร์เดิมและก๊อปปี้ชื่อจริงจาก Drive มาใช้ 100%
     const tasksToSync = selectedTasks.map((t) => {
       const key = getTaskKey(t.sheetName, t.row);
       const inputName = (taskNamesMap[key] || "").trim();
@@ -668,6 +702,9 @@ export default function HomePage() {
     setSyncingTaskKeys(keysToSync);
     setIsSyncing(true);
 
+    const controller = new AbortController();
+    syncAbortControllerRef.current = controller;
+
     try {
       const res = await fetch("/api/sync", {
         method: "POST",
@@ -675,6 +712,7 @@ export default function HomePage() {
         body: JSON.stringify({
           tasks: tasksToSync,
         }),
+        signal: controller.signal,
       });
 
       const result = await res.json();
@@ -737,13 +775,57 @@ export default function HomePage() {
       } else {
         alert(result.error || result.message || "เกิดข้อผิดพลาดในการสร้างโฟลเดอร์");
       }
-    } catch (err) {
+    } catch (err: any) {
+      if (err.name === "AbortError") {
+        console.log("Sync aborted by user");
+        return;
+      }
       console.error(err);
       alert("เกิดข้อผิดพลาดในการเชื่อมต่อ");
     } finally {
       setIsSyncing(false);
       setSyncingTaskKeys([]);
+      syncAbortControllerRef.current = null;
     }
+  };
+
+  // เริ่มนับถอยหลัง 3 วินาที เพื่อให้มีโอกาสกดยกเลิกหากเผลอกดผิด
+  const handleStartSyncCountdown = () => {
+    if (selectedTaskKeys.length === 0) {
+      alert("กรุณาเลือกงานอย่างน้อย 1 รายการเพื่อสร้างโฟลเดอร์");
+      return;
+    }
+
+    if (syncCountdownTimerRef.current) {
+      clearInterval(syncCountdownTimerRef.current);
+    }
+
+    let count = 3;
+    setSyncCountdown(count);
+
+    syncCountdownTimerRef.current = setInterval(() => {
+      count -= 1;
+      if (count <= 0) {
+        if (syncCountdownTimerRef.current) {
+          clearInterval(syncCountdownTimerRef.current);
+          syncCountdownTimerRef.current = null;
+        }
+        setSyncCountdown(null);
+        executeSyncFolders();
+      } else {
+        setSyncCountdown(count);
+      }
+    }, 1000);
+  };
+
+  // ข้ามเวลานับถอยหลังแล้วเริ่มสร้างทันที
+  const handleImmediateSync = () => {
+    if (syncCountdownTimerRef.current) {
+      clearInterval(syncCountdownTimerRef.current);
+      syncCountdownTimerRef.current = null;
+    }
+    setSyncCountdown(null);
+    executeSyncFolders();
   };
 
   const filteredTasks = tasks.filter((t) => {
@@ -1699,38 +1781,79 @@ const renderDateCheckbox = (s: string) => {
 
       {/* Modern Floating Bottom Action Bar */}
       <aside className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 w-[95%] max-w-3xl bg-[#FDFBF7]/95 backdrop-blur-md border border-[#E6E1D7] py-2.5 px-4 rounded-2xl shadow-xl shadow-[#2D2A26]/5 transition-all">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-2.5">
-            <button
-              onClick={handleSelectAllPending}
-              className="px-3 py-1.5 text-xs font-bold text-[#5E513F] bg-[#F5EFE6] hover:bg-[#EAE3D6] active:scale-95 rounded-xl border border-[#DED4C3] transition-all inline-flex items-center gap-1.5 cursor-pointer"
-            >
-              <CheckSquare className="w-3.5 h-3.5 text-[#8C3A27]" />
-              <span>เลือกงานที่ยังไม่เสร็จ</span>
-            </button>
-            <span className="text-xs text-[#7A7368] font-medium">
-              เลือกไว้ <span className="bg-[#FAF4EB] text-[#8C6228] border border-[#EADFCB] px-2 py-0.5 rounded-full font-black text-xs">{selectedTaskKeys.length}</span> งาน
-            </span>
-          </div>
+        {syncCountdown !== null ? (
+          // สถานะนับถอยหลัง 3 วินาที (สามารถกดยกเลิกได้ก่อนสร้างจริงหากเผลอกดผิด)
+          <div className="flex items-center justify-between flex-wrap gap-2 w-full">
+            <div className="flex items-center gap-2.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-[#8C3A27] animate-ping" />
+              <span className="text-xs sm:text-sm font-bold text-[#2D2A26]">
+                กำลังจะเริ่มสร้างใน <span className="text-[#8C3A27] text-base font-black px-0.5">{syncCountdown}</span> วินาที... ({selectedTaskKeys.length} งาน)
+              </span>
+            </div>
 
-          <button
-            onClick={handleSyncFolders}
-            disabled={isSyncing || selectedTaskKeys.length === 0}
-            className="inline-flex items-center justify-center gap-2 px-5 py-2 text-xs sm:text-sm font-bold text-[#FDFCFB] bg-[#8C3A27] hover:bg-[#783020] active:scale-[0.98] rounded-xl shadow-sm shadow-[#8C3A27]/20 disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer"
-          >
-            {isSyncing ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin text-white" />
-                <span>กำลังสร้างโฟลเดอร์...</span>
-              </>
-            ) : (
-              <>
-                <Sparkles className="w-4 h-4 text-[#F5C4B8]" />
-                <span>สร้างโฟลเดอร์ TH & INTER ({selectedTaskKeys.length} งาน)</span>
-              </>
-            )}
-          </button>
-        </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleCancelSync}
+                className="px-4 py-2 text-xs sm:text-sm font-bold text-[#8C3A27] bg-[#FAF0ED] hover:bg-[#F5DFD8] active:scale-95 border border-[#EED0C8] rounded-xl transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-2xs"
+                title="กดยกเลิก หรือกดปุ่ม Esc บนแป้นพิมพ์"
+              >
+                <X className="w-4 h-4 text-[#8C3A27]" />
+                <span>ยกเลิก (Esc)</span>
+              </button>
+              <button
+                onClick={handleImmediateSync}
+                className="px-4 py-2 text-xs sm:text-sm font-bold text-white bg-[#8C3A27] hover:bg-[#783020] active:scale-95 rounded-xl transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-sm shadow-[#8C3A27]/20"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-[#F5C4B8]" />
+                <span>สร้างทันที</span>
+              </button>
+            </div>
+          </div>
+        ) : isSyncing ? (
+          // สถานะกำลังส่งคำขอสร้างโฟลเดอร์ (มีปุ่มยกเลิกการส่งคำขอ)
+          <div className="flex items-center justify-between flex-wrap gap-2 w-full">
+            <div className="flex items-center gap-2.5">
+              <Loader2 className="w-4 h-4 animate-spin text-[#8C3A27]" />
+              <span className="text-xs sm:text-sm font-bold text-[#2D2A26]">
+                กำลังสร้างโฟลเดอร์และอัปเดตชีต... ({selectedTaskKeys.length} งาน)
+              </span>
+            </div>
+
+            <button
+              onClick={handleCancelSync}
+              className="px-3.5 py-1.5 text-xs sm:text-sm font-bold text-[#8C3A27] bg-[#FAF0ED] hover:bg-[#F5DFD8] active:scale-95 border border-[#EED0C8] rounded-xl transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-2xs"
+              title="ยกเลิกการส่งคำขอ"
+            >
+              <X className="w-4 h-4 text-[#8C3A27]" />
+              <span>ยกเลิก</span>
+            </button>
+          </div>
+        ) : (
+          // สถานะปกติพร้อมกดสร้างโฟลเดอร์
+          <div className="flex items-center justify-between flex-wrap gap-2 w-full">
+            <div className="flex items-center gap-2.5">
+              <button
+                onClick={handleSelectAllPending}
+                className="px-3 py-1.5 text-xs font-bold text-[#5E513F] bg-[#F5EFE6] hover:bg-[#EAE3D6] active:scale-95 rounded-xl border border-[#DED4C3] transition-all inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <CheckSquare className="w-3.5 h-3.5 text-[#8C3A27]" />
+                <span>เลือกงานที่ยังไม่เสร็จ</span>
+              </button>
+              <span className="text-xs text-[#7A7368] font-medium">
+                เลือกไว้ <span className="bg-[#FAF4EB] text-[#8C6228] border border-[#EADFCB] px-2 py-0.5 rounded-full font-black text-xs">{selectedTaskKeys.length}</span> งาน
+              </span>
+            </div>
+
+            <button
+              onClick={handleStartSyncCountdown}
+              disabled={selectedTaskKeys.length === 0}
+              className="inline-flex items-center justify-center gap-2 px-5 py-2 text-xs sm:text-sm font-bold text-[#FDFCFB] bg-[#8C3A27] hover:bg-[#783020] active:scale-[0.98] rounded-xl shadow-sm shadow-[#8C3A27]/20 disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer"
+            >
+              <Sparkles className="w-4 h-4 text-[#F5C4B8]" />
+              <span>สร้างโฟลเดอร์ TH & INTER ({selectedTaskKeys.length} งาน)</span>
+            </button>
+          </div>
+        )}
       </aside>
 
       {/* Guide Modal */}
