@@ -261,43 +261,69 @@ export async function GET(req: NextRequest) {
         }
       } catch {}
     } 
-    // 3. กรณีเลือกหลายแผ่นงานพร้อมกัน (Parallel Fetching ด้วย Promise.all)
+    // 3. กรณีเลือกหลายแผ่นงานพร้อมกัน (ส่งเป็นคำขอเดียวให้ GAS จัดการ เพื่อไม่ให้ติดคิวคอขวด)
     else {
-      const batchResults = await Promise.all(
-        requestedSheets.map(async (sName) => {
-          try {
+      const uncachedSheets = isForce
+        ? requestedSheets
+        : requestedSheets.filter((sName) => {
             const singleKey = `tasks_${sName}_${assignee || "ALL"}_${pendingOnly}`;
             const singleCached = serverTasksCache.get(singleKey);
-            if (!isForce && singleCached && Date.now() - singleCached.timestamp < CACHE_TTL_MS) {
-              return singleCached.data.tasks || [];
-            }
+            return !singleCached || Date.now() - singleCached.timestamp >= CACHE_TTL_MS;
+          });
 
-            const sUrl = new URL(gasUrl);
-            sUrl.searchParams.set("action", "getTasks");
-            sUrl.searchParams.set("sheet", sName);
-            sUrl.searchParams.set("assignee", assignee);
-            sUrl.searchParams.set("pendingOnly", "false");
-            if (isForce) sUrl.searchParams.set("force", "true");
+      if (uncachedSheets.length === 0) {
+        allRawTasks = requestedSheets.flatMap((sName) => {
+          const singleKey = `tasks_${sName}_${assignee || "ALL"}_${pendingOnly}`;
+          return serverTasksCache.get(singleKey)?.data?.tasks || [];
+        });
+        isSuccess = true;
+      } else {
+        const targetUrl = new URL(gasUrl);
+        targetUrl.searchParams.set("action", action);
+        targetUrl.searchParams.set("sheet", uncachedSheets.join(","));
+        targetUrl.searchParams.set("assignee", assignee);
+        targetUrl.searchParams.set("pendingOnly", "false");
+        if (isForce) targetUrl.searchParams.set("force", "true");
 
-            const sRes = await fetch(sUrl.toString(), {
-              method: "GET",
-              headers: { Accept: "application/json" },
-              redirect: "follow",
-              cache: "no-store",
+        const res = await fetch(targetUrl.toString(), {
+          method: "GET",
+          headers: { Accept: "application/json" },
+          redirect: "follow",
+          cache: "no-store",
+        });
+
+        const responseText = await res.text();
+        try {
+          const data = JSON.parse(responseText);
+          if (data && data.success && Array.isArray(data.tasks)) {
+            const groupedBySheet: Record<string, any[]> = {};
+            data.tasks.forEach((t: any) => {
+              if (!groupedBySheet[t.sheetName]) groupedBySheet[t.sheetName] = [];
+              groupedBySheet[t.sheetName].push(t);
             });
-            const sData = await sRes.json();
-            if (sData.success && Array.isArray(sData.tasks)) {
-              return sData.tasks;
-            }
-            return [];
-          } catch {
-            return [];
-          }
-        })
-      );
+            uncachedSheets.forEach((sName) => {
+              const sTasks = groupedBySheet[sName] || [];
+              const sKey = `tasks_${sName}_${assignee || "ALL"}_${pendingOnly}`;
+              serverTasksCache.set(sKey, {
+                data: { success: true, tasks: sTasks },
+                timestamp: Date.now(),
+              });
+            });
 
-      allRawTasks = batchResults.flat();
-      isSuccess = true;
+            const cachedTasks = requestedSheets
+              .filter((s) => !uncachedSheets.includes(s))
+              .flatMap((sName) => {
+                const sKey = `tasks_${sName}_${assignee || "ALL"}_${pendingOnly}`;
+                return serverTasksCache.get(sKey)?.data?.tasks || [];
+              });
+
+            allRawTasks = [...data.tasks, ...cachedTasks];
+            isSuccess = true;
+          }
+        } catch (e) {
+          console.error("[API /tasks] Multi-sheet JSON parse error:", e);
+        }
+      }
     }
 
     if (isSuccess) {

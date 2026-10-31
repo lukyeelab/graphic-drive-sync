@@ -85,6 +85,11 @@ export default function HomePage() {
     Record<string, { thUrl?: string; interUrl?: string }>
   >({});
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [streamingProgress, setStreamingProgress] = useState<{
+    current: number;
+    total: number;
+    activeSheet?: string;
+  } | null>(null);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState<string>("");
@@ -164,6 +169,52 @@ export default function HomePage() {
     setFolderLinksMap(incomingLinks);
   };
 
+  // ทยอยเพิ่มงานลง State ทีละชุดที่ดึงเสร็จทันที (Progressive Rendering)
+  const appendTasksToState = (newBatchTasks: Task[], targetAssignee: string) => {
+    const searchLower = (targetAssignee || "").toLowerCase().trim();
+    const filteredNew = searchLower && searchLower !== "all"
+      ? newBatchTasks.filter((t) => (t.assignee || "").toLowerCase().includes(searchLower))
+      : newBatchTasks;
+
+    setTasks((prevTasks) => {
+      const newSheetNames = new Set(filteredNew.map((t) => t.sheetName));
+      const remaining = prevTasks.filter((t) => !newSheetNames.has(t.sheetName));
+      return [...remaining, ...filteredNew];
+    });
+
+    setTaskNamesMap((prev) => {
+      const updated = { ...prev };
+      filteredNew.forEach((t) => {
+        const key = getTaskKey(t.sheetName, t.row);
+        if (updated[key] === undefined) {
+          updated[key] = (t.taskName || "").trim();
+        }
+      });
+      return updated;
+    });
+
+    setSelectedTaskKeys((prev) => {
+      const newPending = filteredNew
+        .filter((t) => !t.isCompleted)
+        .map((t) => getTaskKey(t.sheetName, t.row));
+      return Array.from(new Set([...prev, ...newPending]));
+    });
+
+    setFolderLinksMap((prev) => {
+      const updated = { ...prev };
+      filteredNew.forEach((t) => {
+        const key = getTaskKey(t.sheetName, t.row);
+        if (t.uploadUrl || t.interFolderUrl) {
+          updated[key] = {
+            thUrl: t.uploadUrl || "",
+            interUrl: t.interFolderUrl || "",
+          };
+        }
+      });
+      return updated;
+    });
+  };
+
   // ดึงงานของแผ่นงานมารอไว้ล่วงหน้าเงียบๆ (Prefetch)
   const prefetchSheetTasks = async (targetSheet: string) => {
     if (!targetSheet || targetSheet === "ALL" || clientSheetCacheRef.current[targetSheet]) return;
@@ -220,7 +271,7 @@ export default function HomePage() {
     }
   };
 
-  // โหลดรายการงานตามชื่อพนักงานและวันที่เลือก (Multi-Date Parallel Fetch + Client Cache Stitching)
+  // โหลดรายการงานตามชื่อพนักงานและวันที่เลือก (Progressive Chunked Fetching: ดึงเสร็จชุดไหนโชว์ทันทีก่อน)
   const fetchTasks = async (
     targetAssignee = assignee,
     targetSheets: string[] | string = selectedSheets,
@@ -236,25 +287,6 @@ export default function HomePage() {
       clientSheetCacheRef.current = {};
     }
 
-    // 1. ตรวจสอบว่าใน Client Cache มีครบทุกชีตที่เลือกหรือไม่ ถ้ามีครบให้แสดงผลทันทีใน 0 มิลลิวินาที
-    const isAllCached =
-      !forceLoading &&
-      !sheetsArray.includes("ALL") &&
-      sheetsArray.every(
-        (s) => clientSheetCacheRef.current[s] && clientSheetCacheRef.current[s].length > 0
-      );
-
-    if (isAllCached) {
-      const stitchedTasks = sheetsArray.flatMap(
-        (s) => clientSheetCacheRef.current[s] || []
-      );
-      applyTasksToState(stitchedTasks, targetAssignee);
-      setIsLoading(false);
-      setErrorMessage(null);
-    } else {
-      setIsLoading(true);
-    }
-
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -264,62 +296,165 @@ export default function HomePage() {
     setErrorMessage(null);
     setSyncResult(null);
 
-    const timeoutId = setTimeout(() => {
-      if (abortControllerRef.current === controller) {
-        controller.abort();
+    const isModeAll = sheetsArray.includes("ALL");
+    const targetSheetsList = isModeAll
+      ? (availableSheets.length > 0 ? availableSheets : ["ALL"])
+      : sheetsArray;
+
+    // 1. ตรวจสอบว่าใน Client Cache มีข้อมูลของชีตใดอยู่แล้วบ้าง ให้แสดงผลทันทีใน 0 ms
+    const cachedSheets = !forceLoading && !isModeAll
+      ? targetSheetsList.filter((s) => clientSheetCacheRef.current[s] && clientSheetCacheRef.current[s].length > 0)
+      : (!forceLoading
+          ? targetSheetsList.filter((s) => clientSheetCacheRef.current[s] && clientSheetCacheRef.current[s].length > 0)
+          : []);
+
+    const isAllCached = !forceLoading && cachedSheets.length === targetSheetsList.length && targetSheetsList.length > 0;
+
+    if (cachedSheets.length > 0) {
+      const stitchedCached = cachedSheets.flatMap((s) => clientSheetCacheRef.current[s] || []);
+      applyTasksToState(stitchedCached, targetAssignee);
+      if (isAllCached) {
         setIsLoading(false);
-        setErrorMessage("การเชื่อมต่อใช้เวลานาน กรุณากด 'ค้นหางานของฉัน' อีกครั้ง");
+        setStreamingProgress(null);
+        return;
       }
-    }, 120000);
+    }
+
+    // แผ่นงานที่ยังไม่มีในแคช
+    const uncachedSheets = forceLoading
+      ? targetSheetsList
+      : targetSheetsList.filter((s) => !clientSheetCacheRef.current[s]);
+
+    // ถ้ายังไม่มีข้อมูลในแคชเลย ให้หมุนโหลดรอชุดแรก
+    if (cachedSheets.length === 0) {
+      setIsLoading(true);
+      setTasks([]);
+    } else {
+      setIsLoading(false);
+    }
+
+    // กรณีเป็นแผ่นงานเดียว หรือโหมด ALL ที่ยังไม่รู้รายชื่อแผ่นงาน
+    if (uncachedSheets.length === 1 || (isModeAll && availableSheets.length === 0)) {
+      try {
+        const queryAssignee = isModeAll ? targetAssignee : "ALL";
+        const forceQuery = forceLoading ? "&force=true" : "";
+        const res = await fetch(
+          `/api/tasks?action=getTasks&sheet=${encodeURIComponent(uncachedSheets[0])}&assignee=${encodeURIComponent(
+            queryAssignee
+          )}&pendingOnly=false${forceQuery}&_t=${Date.now()}`,
+          { signal: controller.signal }
+        );
+
+        if (abortControllerRef.current !== controller) return;
+        const data = await res.json();
+        if (data.success && Array.isArray(data.tasks)) {
+          const rawTasks: Task[] = data.tasks;
+          const grouped: Record<string, Task[]> = {};
+          rawTasks.forEach((t) => {
+            if (!grouped[t.sheetName]) grouped[t.sheetName] = [];
+            grouped[t.sheetName].push(t);
+          });
+          Object.entries(grouped).forEach(([sName, sTasks]) => {
+            clientSheetCacheRef.current[sName] = sTasks;
+          });
+          applyTasksToState(rawTasks, targetAssignee);
+        } else {
+          if (cachedSheets.length === 0) {
+            setErrorMessage(data.error || "เกิดข้อผิดพลาดในการดึงข้อมูลจาก Google Sheets");
+            setTasks([]);
+          }
+        }
+      } catch (err: any) {
+        if (err.name !== "AbortError" && cachedSheets.length === 0) {
+          setErrorMessage("ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ Next.js ได้");
+        }
+      } finally {
+        if (abortControllerRef.current === controller) {
+          setIsLoading(false);
+          setStreamingProgress(null);
+        }
+      }
+      return;
+    }
+
+    // 2. โหมดดึงข้อมูลแบบ Progressive (อันไหนดึงเสร็จก่อน นำขึ้นมาแสดงผลก่อนทันที!)
+    const batches: string[][] = [];
+    if (uncachedSheets.length > 0) {
+      // แบทช์แรก: แผ่นแรกสุด (วันล่าสุด) ดึงเดี่ยวๆ เพื่อให้โชว์บนจอทันทีใน ~300ms!
+      batches.push([uncachedSheets[0]]);
+
+      let cursor = 1;
+      const stepSizes = [2, 3, 5, 8, 12, 16];
+      let stepIdx = 0;
+      while (cursor < uncachedSheets.length) {
+        const size = stepSizes[stepIdx] || 15;
+        batches.push(uncachedSheets.slice(cursor, cursor + size));
+        cursor += size;
+        stepIdx++;
+      }
+    }
+
+    let loadedCount = cachedSheets.length;
+    setStreamingProgress({
+      current: loadedCount,
+      total: targetSheetsList.length,
+      activeSheet: uncachedSheets[0] || "",
+    });
 
     try {
-      const sheetsParam = sheetsArray.join(",");
-      const queryAssignee = sheetsArray.includes("ALL") ? targetAssignee : "ALL";
-      // สำหรับโหมด ALL ไม่ส่ง force=true เพื่อให้ดึงข้อมูลเร็วระดับ 1-2 วินาที ไม่ติด Timeout
-      const forceQuery = (forceLoading && !sheetsArray.includes("ALL")) ? "&force=true" : "";
-      const res = await fetch(
-        `/api/tasks?action=getTasks&sheet=${encodeURIComponent(sheetsParam)}&assignee=${encodeURIComponent(
-          queryAssignee
-        )}&pendingOnly=false${forceQuery}&_t=${Date.now()}`,
-        { signal: controller.signal }
-      );
-      clearTimeout(timeoutId);
+      for (const batch of batches) {
+        if (controller.signal.aborted || abortControllerRef.current !== controller) break;
 
-      // ถ้ามี request ใหม่ถูกส่งออกไปแล้วระหว่างรอ ให้ข้ามผลลัพธ์ของ request เก่านี้ไป
-      if (abortControllerRef.current !== controller) return;
+        const activeName = batch.length === 1 ? batch[0] : `${batch[0]} ถึง ${batch[batch.length - 1]}`;
+        setStreamingProgress((prev) => ({
+          current: loadedCount,
+          total: targetSheetsList.length,
+          activeSheet: activeName,
+        }));
 
-      const data = await res.json();
-      if (data.success) {
-        const rawTasks: Task[] = data.tasks || [];
+        const queryAssignee = isModeAll ? targetAssignee : "ALL";
+        const forceQuery = forceLoading ? "&force=true" : "";
+        const res = await fetch(
+          `/api/tasks?action=getTasks&sheet=${encodeURIComponent(batch.join(","))}&assignee=${encodeURIComponent(
+            queryAssignee
+          )}&pendingOnly=false${forceQuery}&_t=${Date.now()}`,
+          { signal: controller.signal }
+        );
 
-        // บันทึกลง Client Cache แยกตามแผ่นงาน
-        const grouped: Record<string, Task[]> = {};
-        rawTasks.forEach((t) => {
-          if (!grouped[t.sheetName]) grouped[t.sheetName] = [];
-          grouped[t.sheetName].push(t);
-        });
-        Object.entries(grouped).forEach(([sName, sTasks]) => {
-          clientSheetCacheRef.current[sName] = sTasks;
-        });
+        if (controller.signal.aborted || abortControllerRef.current !== controller) break;
 
-        applyTasksToState(rawTasks, targetAssignee);
-      } else {
-        if (!isAllCached) {
-          setErrorMessage(data.error || "เกิดข้อผิดพลาดในการดึงข้อมูลจาก Google Sheets");
-          setTasks([]);
+        const data = await res.json();
+        if (data.success && Array.isArray(data.tasks)) {
+          const rawTasks: Task[] = data.tasks;
+          const grouped: Record<string, Task[]> = {};
+          rawTasks.forEach((t) => {
+            if (!grouped[t.sheetName]) grouped[t.sheetName] = [];
+            grouped[t.sheetName].push(t);
+          });
+          Object.entries(grouped).forEach(([sName, sTasks]) => {
+            clientSheetCacheRef.current[sName] = sTasks;
+          });
+
+          // ดึงข้อมูลชุดนี้เสร็จแล้ว แสดงผลขึ้นมาบนหน้าจอทันที!
+          appendTasksToState(rawTasks, targetAssignee);
+          setIsLoading(false); // ปิดตัวหมุนโหลดใหญ่ทันที
+          loadedCount += batch.length;
+
+          setStreamingProgress({
+            current: Math.min(loadedCount, targetSheetsList.length),
+            total: targetSheetsList.length,
+            activeSheet: activeName,
+          });
         }
       }
     } catch (err: any) {
       if (err.name !== "AbortError") {
         console.error(err);
-        if (!isAllCached) {
-          setErrorMessage("ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ Next.js ได้");
-        }
       }
     } finally {
-      clearTimeout(timeoutId);
       if (abortControllerRef.current === controller) {
         setIsLoading(false);
+        setStreamingProgress(null);
       }
     }
   };
@@ -1046,7 +1181,50 @@ export default function HomePage() {
             </section>
           )
         ) : (
-          Object.keys(groupedTasksByDate).map((dateSheet) => {
+          <>
+            {/* Streaming Progress Banner */}
+            {streamingProgress && (
+              <div className="bg-linear-to-r from-indigo-50/90 to-violet-50/90 border border-indigo-200 rounded-2xl p-3.5 flex items-center justify-between shadow-2xs">
+                <div className="flex items-center gap-3">
+                  <span className="relative flex h-3 w-3">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-indigo-600"></span>
+                  </span>
+                  <div>
+                    <p className="text-xs font-bold text-indigo-950 flex items-center gap-1.5 flex-wrap">
+                      <span>กำลังทยอยดึงข้อมูลจาก Google Sheets...</span>
+                      <span className="bg-indigo-100 text-indigo-800 text-[11px] font-extrabold px-2 py-0.5 rounded-full border border-indigo-200">
+                        แสดงแล้ว {streamingProgress.current} จากทั้งหมด {streamingProgress.total} วัน
+                      </span>
+                    </p>
+                    {streamingProgress.activeSheet && (
+                      <p className="text-[11px] text-indigo-600/90 mt-0.5">
+                        แผ่นงานที่ดึงเสร็จแล้วจะนำขึ้นมาแสดงทันที (กำลังดึง: {streamingProgress.activeSheet})
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    if (abortControllerRef.current) abortControllerRef.current.abort();
+                    setStreamingProgress(null);
+                    setIsLoading(false);
+                  }}
+                  className="text-xs font-bold text-indigo-700 hover:text-indigo-900 bg-white hover:bg-indigo-50 border border-indigo-200 px-3 py-1.5 rounded-xl transition-all shadow-2xs cursor-pointer shrink-0"
+                >
+                  หยุดโหลดต่อ
+                </button>
+              </div>
+            )}
+
+            {Object.keys(groupedTasksByDate)
+              .sort((a, b) => {
+                const idxA = availableSheets.indexOf(a);
+                const idxB = availableSheets.indexOf(b);
+                if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+                return 0;
+              })
+              .map((dateSheet) => {
             const dateTasks = groupedTasksByDate[dateSheet];
 
             return (
@@ -1251,7 +1429,8 @@ export default function HomePage() {
                 </div>
               </section>
             );
-          })
+          })}
+          </>
         )}
       </main>
 

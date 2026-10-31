@@ -1063,9 +1063,9 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force) {
 
   let targetSheetNames = [];
   if (targetSheet && targetSheet !== "ALL") {
-    if (allSheetNames.includes(targetSheet)) {
-      targetSheetNames.push(targetSheet);
-    } else {
+    const rawList = targetSheet.split(",").map(s => s.trim()).filter(Boolean);
+    targetSheetNames = rawList.filter(s => allSheetNames.includes(s));
+    if (targetSheetNames.length === 0) {
       return { success: false, error: `ไม่พบแผ่นงานชื่อ: ${targetSheet}` };
     }
   } else {
