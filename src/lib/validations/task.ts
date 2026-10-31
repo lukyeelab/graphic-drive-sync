@@ -11,9 +11,11 @@ export const batchTaskItemSchema = z.object({
   sheetName: z.string().min(1, "กรุณาระบุชื่อแผ่นงาน เช่น 7 พย"),
   row: z.number().int().positive("หมายเลขแถวต้องเป็นจำนวนเต็มบวก"),
   category: z.string().min(1, "หมวดหมู่งานต้องไม่ว่าง"),
-  taskName: z.string().min(1, "ชื่องานต้องไม่ว่าง"),
+  taskName: z.string().optional().default(""),
   no: z.union([z.number(), z.string()]).optional(),
   existingUrl: z.string().optional(),
+  isRename: z.boolean().optional(),
+  isCustomName: z.boolean().optional(),
 });
 
 export const syncFolderBatchRequestSchema = z.object({

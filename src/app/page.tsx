@@ -638,21 +638,29 @@ export default function HomePage() {
     );
 
     // เตรียมข้อมูลงานที่จะส่งไปสร้าง/เชื่อมโยงโฟลเดอร์
-    // หากช่องชื่องานว่างอยู่ จะใช้ชื่อเริ่มต้นตามลำดับงานและหมวดหมู่โดยอัตโนมัติ (เช่น 5_กีฬาอื่นๆ) เพื่อความสะดวก
+    // รองรับ 3 กรณี:
+    // 1. มีลิงก์เดิมอยู่แล้ว + ผู้ใช้พิมพ์แก้ชื่อใหม่ -> สั่งเปลี่ยนชื่อโฟลเดอร์ใน Drive และอัปเดตชีต (isRename = true)
+    // 2. ไม่มีลิงก์ในชีต + ผู้ใช้พิมพ์ชื่อเข้ามาเอง -> ตั้งชื่อตามที่พิมพ์ (isCustomName = true)
+    // 3. ไม่มีลิงก์ในชีต + ช่องชื่องานว่างเปล่า -> ให้ค้นหาโฟลเดอร์เดิมและก๊อปปี้ชื่อจริงจาก Drive มาใช้ 100%
     const tasksToSync = selectedTasks.map((t) => {
       const key = getTaskKey(t.sheetName, t.row);
-      const inputName = (taskNamesMap[key] || t.taskName || "").trim();
-      const defaultName = `${t.no || 1}_${t.category || "ทั่วไป"}`;
-      const finalName = inputName || defaultName;
-      const isCustomName = !!inputName && inputName !== defaultName;
+      const inputName = (taskNamesMap[key] || "").trim();
+      const originalName = (t.taskName || "").trim();
+      const existingUrl = (t.uploadUrl || folderLinksMap[key]?.thUrl || "").trim();
+      const hasExistingLink = !!existingUrl;
+
+      const isRename = hasExistingLink && inputName !== "" && inputName !== originalName;
+      const isCustomName = !hasExistingLink && inputName !== "";
+
       return {
         sheetName: t.sheetName,
         row: t.row,
         category: t.category,
         no: t.no,
-        taskName: finalName,
+        taskName: inputName,
+        isRename: isRename,
         isCustomName: isCustomName,
-        existingUrl: t.uploadUrl || folderLinksMap[key]?.thUrl || "",
+        existingUrl: existingUrl,
       };
     });
 
@@ -1550,23 +1558,38 @@ const renderDateCheckbox = (s: string) => {
                               {task.no || "-"}
                             </td>
                             <td className="py-3.5 px-4" onClick={(e) => e.stopPropagation()}>
-                              <div className="flex flex-col gap-1.5">
-                                <div className="relative">
-                                  <input
-                                    type="text"
-                                    value={taskNamesMap[key] ?? ""}
-                                    onChange={(e) => {
-                                      setTaskNamesMap((prev) => ({
-                                        ...prev,
-                                        [key]: e.target.value,
-                                      }));
-                                    }}
-                                    placeholder="พิมพ์ชื่องาน/ชื่อโฟลเดอร์..."
-                                    className="w-full px-3 py-1.5 text-xs font-medium bg-[#F7F5EF] hover:bg-white border border-[#E2DDD2] rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-[#8C3A27]/10 focus:border-[#8C3A27] transition-all pr-7 text-[#2D2A26] placeholder-[#A8A196]"
-                                  />
-                                  <Edit3 className="w-3.5 h-3.5 text-[#C8C2B7] absolute right-2.5 top-2 pointer-events-none" />
-                                </div>
-                              </div>
+                              {(() => {
+                                const currentInput = (taskNamesMap[key] ?? "").trim();
+                                const originalName = (task.taskName || "").trim();
+                                const thUrl = (folderLinksMap[key]?.thUrl || task.uploadUrl || "").trim();
+                                const isDirtyRename = !!thUrl && !!currentInput && currentInput !== originalName;
+
+                                return (
+                                  <div className="flex flex-col gap-1.5">
+                                    <div className="relative">
+                                      <input
+                                        type="text"
+                                        value={taskNamesMap[key] ?? ""}
+                                        onChange={(e) => {
+                                          setTaskNamesMap((prev) => ({
+                                            ...prev,
+                                            [key]: e.target.value,
+                                          }));
+                                        }}
+                                        placeholder="พิมพ์ชื่องาน/ชื่อโฟลเดอร์..."
+                                        className="w-full px-3 py-1.5 text-xs font-medium bg-[#F7F5EF] hover:bg-white border border-[#E2DDD2] rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-[#8C3A27]/10 focus:border-[#8C3A27] transition-all pr-7 text-[#2D2A26] placeholder-[#A8A196]"
+                                      />
+                                      <Edit3 className="w-3.5 h-3.5 text-[#C8C2B7] absolute right-2.5 top-2 pointer-events-none" />
+                                    </div>
+                                    {isDirtyRename && (
+                                      <div className="flex items-center gap-1 text-[10px] text-[#8C6228]">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-[#8C6228] animate-pulse" />
+                                        <span>พร้อมเปลี่ยนชื่อโฟลเดอร์ใน Drive</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })()}
                             </td>
                             <td className="py-3.5 px-3 text-center whitespace-nowrap">
                               {(() => {

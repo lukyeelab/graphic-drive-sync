@@ -1969,9 +1969,14 @@ function createFoldersAndSyncBatch(payload) {
       const task = sheetTasks[t];
       const rawCategory = task.category || "ทั่วไป";
       const catInfo = getCategoryInfoSmart(rawCategory);
-      const taskName = task.taskName || `${task.no || 1}_${catInfo.thTarget}`;
       const row = task.row;
       const rowOffset = row - CONFIG.DATA_START_ROW;
+
+      const requestedName = (task.taskName || "").trim();
+      const isRename = task.isRename === true;
+      const isCustomName = task.isCustomName === true;
+      const defaultName = `${task.no || 1}_${catInfo.thTarget}`;
+      const searchName = requestedName || defaultName;
 
       // 3. หมวดหมู่ฝั่ง TH
       let thCatFolder = thCatFolderCache[catInfo.thTarget];
@@ -2015,12 +2020,13 @@ function createFoldersAndSyncBatch(payload) {
           const existingF = DriveApp.getFolderById(existingThFolderId);
           if (existingF && !existingF.isTrashed()) {
             thTaskFolder = existingF;
-            if (task.isCustomName && thTaskFolder.getName() !== taskName.trim()) {
-              thTaskFolder.setName(taskName.trim());
+            // เปลี่ยนชื่อเฉพาะเมื่อผู้ใช้สั่งเปลี่ยนชื่อใหม่จริงๆ (isRename)
+            if (isRename && requestedName && thTaskFolder.getName() !== requestedName) {
+              thTaskFolder.setName(requestedName);
             }
           }
         } catch (e) {
-          Logger.log("Error renaming existing TH folder: " + e.message);
+          Logger.log("Error accessing existing TH folder: " + e.message);
         }
       }
 
@@ -2030,15 +2036,30 @@ function createFoldersAndSyncBatch(payload) {
           `${task.no || 1}_${catInfo.thTarget}`,
           `${task.no || 1} ${catInfo.thTarget}`,
         ];
-        thTaskFolder = getOrCreateFolderSmart(thCatFolder, taskName, thAliases, {
+        thTaskFolder = getOrCreateFolderSmart(thCatFolder, searchName, thAliases, {
           taskNo: task.no
         });
-        if (task.isCustomName && thTaskFolder && thTaskFolder.getName() !== taskName.trim()) {
-          try { thTaskFolder.setName(taskName.trim()); } catch (e) {}
+        // ถ้าโฟลเดอร์นี้มีอยู่เดิมบน Google Drive และผู้ใช้สั่งเปลี่ยนชื่อใหม่ (isRename) ค่อยเปลี่ยนชื่อ
+        if (isRename && requestedName && thTaskFolder && thTaskFolder.getName() !== requestedName) {
+          try { thTaskFolder.setName(requestedName); } catch (e) {}
         }
       }
-      // ก๊อปปี้ชื่อโฟลเดอร์เดิมจริงจาก Google Drive มาใช้เสมอ เพื่อให้ได้ชื่อโฟลเดอร์เดิมที่ถูกต้อง 100%
-      const finalTaskName = thTaskFolder ? thTaskFolder.getName() : taskName;
+
+      // กำหนดชื่องานที่จะนำไปเขียนลงในชีต:
+      // - กรณีสั่งเปลี่ยนชื่อ (isRename) -> ใช้ requestedName
+      // - กรณีตั้งใจพิมพ์ชื่อใหม่สำหรับงานใหม่ (isCustomName) -> ใช้ requestedName
+      // - กรณีไม่มีลิงก์ในชีตแล้วค้นพบโฟลเดอร์เดิม -> ก๊อปปี้ชื่อจริงของโฟลเดอร์เดิมจาก Drive 100%!
+      let finalTaskName = "";
+      if (isRename && requestedName) {
+        finalTaskName = requestedName;
+      } else if (isCustomName && requestedName) {
+        finalTaskName = requestedName;
+      } else if (thTaskFolder) {
+        finalTaskName = thTaskFolder.getName();
+      } else {
+        finalTaskName = searchName;
+      }
+
       const thUrl = thTaskFolder ? thTaskFolder.getUrl() : "";
 
       // 6. โฟลเดอร์งานฝั่ง INTER
