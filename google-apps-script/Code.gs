@@ -31,6 +31,22 @@ const CONFIG = {
   COL_RECEIVER: 14,      // Col N: ชื่อคนรับ
 };
 
+/**
+ * ฟังก์ชันช่วยตรวจสอบและให้สิทธิ์การเข้าถึง (Authorization)
+ * หาก Apps Script แจ้งเตือนเรื่องสิทธิ์ UrlFetchApp หรือ external_request
+ * ให้เลือกฟังก์ชัน authorizePermissions นี้ แล้วกด "เรียกใช้ (Run)" 1 ครั้ง
+ */
+function authorizePermissions() {
+  const token = ScriptApp.getOAuthToken();
+  Logger.log("OAuth Token: " + (token ? "พร้อมใช้งาน" : "ไม่พบ"));
+  try {
+    const res = UrlFetchApp.fetch("https://www.google.com", { muteHttpExceptions: true });
+    Logger.log("UrlFetchApp สิทธิ์ถูกต้องสมบูรณ์ (Response: " + res.getResponseCode() + ")");
+  } catch (e) {
+    Logger.log("UrlFetchApp authorization error: " + e.message);
+  }
+}
+
 // การแปลงหมวดหมู่งานเป็นชื่อโฟลเดอร์ของ TH และ INTER
 const CATEGORY_MAP_TH = {
   "สล็อต": "สล็อต SLOT",
@@ -961,6 +977,22 @@ function getSheetNamesFast(ss) {
  * ใช้ช่วง A1:L เพื่อตัด Header และคอลัมน์ที่ไม่ใช้ออก ลดขนาด JSON ลงให้โหลดไวระดับมิลลิวินาที
  */
 function fetchSheetsGridDataFast(spreadsheetId, sheetNames) {
+  // 1. เรียกผ่าน Google Sheets Advanced Service หากผู้ใช้เปิดใช้งานไว้ (ไม่ต้องขอสิทธิ์ UrlFetchApp)
+  if (typeof Sheets !== "undefined" && Sheets && Sheets.Spreadsheets && typeof Sheets.Spreadsheets.get === "function") {
+    try {
+      const maxRow = sheetNames.length === 1 ? 220 : 120;
+      const ranges = sheetNames.map(name => `'${name}'!A1:L${maxRow}`);
+      const fields = "sheets(properties(title),data(rowData(values(formattedValue,hyperlink,note,userEnteredValue,textFormatRuns,chipRuns))))";
+      const res = Sheets.Spreadsheets.get(spreadsheetId, { ranges: ranges, fields: fields });
+      if (res && res.sheets) {
+        return res;
+      }
+    } catch (eAdv) {
+      Logger.log("fetchSheetsGridDataFast Sheets Advanced Service: " + eAdv.message);
+    }
+  }
+
+  // 2. เรียกผ่าน UrlFetchApp ด้วย Sheets API v4
   try {
     const token = ScriptApp.getOAuthToken();
     const maxRow = sheetNames.length === 1 ? 220 : 120;
@@ -1437,28 +1469,42 @@ function writeSmartChipsBatchToSheet(spreadsheetId, sheet, updates) {
   let apiSuccess = false;
   let errorDetail = "";
 
-  // ขั้นตอนที่ 1: เรียกใช้ Sheets API v4 เพื่อสร้าง Smart Chip การ์ดสวยงามทันที
-  try {
-    const token = ScriptApp.getOAuthToken();
-    const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`;
-    const res = UrlFetchApp.fetch(apiUrl, {
-      method: "post",
-      contentType: "application/json",
-      headers: { "Authorization": "Bearer " + token },
-      payload: JSON.stringify({ requests: chipRequests }),
-      muteHttpExceptions: true
-    });
-
-    if (res.getResponseCode() === 200) {
+  // ขั้นตอนที่ 1: เรียกใช้ผ่าน Google Sheets Advanced Service หากผู้ใช้เปิดไว้ (เร็วที่สุด และไม่ต้องขอสิทธิ์ external_request)
+  if (typeof Sheets !== "undefined" && Sheets && Sheets.Spreadsheets && typeof Sheets.Spreadsheets.batchUpdate === "function") {
+    try {
+      Sheets.Spreadsheets.batchUpdate({ requests: chipRequests }, spreadsheetId);
       apiSuccess = true;
-      Logger.log("สร้าง Google Drive Smart Chip สำเร็จผ่าน Sheets API v4");
-    } else {
-      errorDetail = `UrlFetchApp (${res.getResponseCode()}): ${res.getContentText()}`;
-      Logger.log("UrlFetchApp batchUpdate response: " + errorDetail);
+      Logger.log("สร้าง Google Drive Smart Chip สำเร็จผ่าน Sheets Advanced Service");
+    } catch (eAdv) {
+      errorDetail = "Sheets Advanced Service: " + eAdv.message;
+      Logger.log(errorDetail);
     }
-  } catch (e) {
-    errorDetail = e.message;
-    Logger.log("UrlFetchApp batchUpdate error: " + e.message);
+  }
+
+  // ขั้นตอนที่ 2: หากไม่มี Advanced Service ให้เรียกผ่าน UrlFetchApp ด้วย Sheets API v4
+  if (!apiSuccess) {
+    try {
+      const token = ScriptApp.getOAuthToken();
+      const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`;
+      const res = UrlFetchApp.fetch(apiUrl, {
+        method: "post",
+        contentType: "application/json",
+        headers: { "Authorization": "Bearer " + token },
+        payload: JSON.stringify({ requests: chipRequests }),
+        muteHttpExceptions: true
+      });
+
+      if (res.getResponseCode() === 200) {
+        apiSuccess = true;
+        Logger.log("สร้าง Google Drive Smart Chip สำเร็จผ่าน Sheets API v4");
+      } else {
+        errorDetail = `UrlFetchApp (${res.getResponseCode()}): ${res.getContentText()}`;
+        Logger.log("UrlFetchApp batchUpdate response: " + errorDetail);
+      }
+    } catch (e) {
+      errorDetail = e.message;
+      Logger.log("UrlFetchApp batchUpdate error: " + e.message);
+    }
   }
 
   // ขั้นตอนที่ 2: หาก Sheets API ไม่สำเร็จ ให้ใช้ Fallback RichText Hyperlink เพื่อรับประกันว่ามีลิงก์เปิดได้เสมอ
