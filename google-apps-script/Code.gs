@@ -33,6 +33,147 @@ const CONFIG = {
 
 // In-Memory Cache สำหรับเก็บรายการโฟลเดอร์ย่อยระหว่างรัน เพื่อลดการเรียก DriveApp.getFolders() ซ้ำซ้อน
 const FOLDER_CHILDREN_CACHE = {};
+const CATEGORY_INFO_CACHE = {};
+const DATE_FORMAT_CACHE = {};
+const B64_KEY_CACHE = {};
+let CACHED_OAUTH_TOKEN = null;
+let CACHED_SPREADSHEET_ID = null;
+let CACHED_ACTIVE_SS = null;
+
+/**
+ * ดึง OAuth Token โดยจำค่าไว้ในตัวแปรตลอดรอบรัน (ไม่ต้องเรียก ScriptApp ซ้ำ)
+ */
+function getFastOAuthToken() {
+  if (!CACHED_OAUTH_TOKEN) {
+    CACHED_OAUTH_TOKEN = ScriptApp.getOAuthToken();
+  }
+  return CACHED_OAUTH_TOKEN;
+}
+
+/**
+ * ดึง Active Spreadsheet Object โดยจำค่าไว้ในตัวแปรตลอดรอบรัน
+ */
+function getFastActiveSpreadsheet() {
+  if (!CACHED_ACTIVE_SS) {
+    CACHED_ACTIVE_SS = SpreadsheetApp.getActiveSpreadsheet();
+  }
+  return CACHED_ACTIVE_SS;
+}
+
+/**
+ * ดึง Spreadsheet ID แบบเร็วพิเศษจาก Cache หรือ Memory โดยไม่ต้องปลุก SpreadsheetApp หากไม่จำเป็น
+ */
+function getFastSpreadsheetId() {
+  if (CACHED_SPREADSHEET_ID) return CACHED_SPREADSHEET_ID;
+  const cache = CacheService.getScriptCache();
+  const cachedId = cache.get("STATIC_SS_ID_V1");
+  if (cachedId) {
+    CACHED_SPREADSHEET_ID = cachedId;
+    return cachedId;
+  }
+  const ss = getFastActiveSpreadsheet();
+  CACHED_SPREADSHEET_ID = ss.getId();
+  try {
+    cache.put("STATIC_SS_ID_V1", CACHED_SPREADSHEET_ID, 21600);
+  } catch (e) {}
+  return CACHED_SPREADSHEET_ID;
+}
+
+/**
+ * แปลงข้อความเป็นรหัส Base64 สำหรับทำ Cache Key พร้อมจำค่าไว้ใน Memory (ไม่ต้องคำนวณซ้ำในลูป)
+ */
+function getSafeB64Key(str, maxLen) {
+  const limit = maxLen || 35;
+  const cacheKey = `${limit}_${str}`;
+  if (B64_KEY_CACHE[cacheKey] !== undefined) {
+    return B64_KEY_CACHE[cacheKey];
+  }
+  const encoded = Utilities.base64EncodeWebSafe(str).slice(0, limit);
+  B64_KEY_CACHE[cacheKey] = encoded;
+  return encoded;
+}
+
+/**
+ * ดึงรายการโฟลเดอร์ย่อยพร้อมจำค่าไว้ใน In-Memory Cache (เรียก DriveApp เพียง 1 ครั้งต่อโฟลเดอร์หลัก)
+ */
+function getCachedSubFoldersList(parentFolder) {
+  if (!parentFolder) return [];
+  const parentId = parentFolder.getId();
+  let folderList = FOLDER_CHILDREN_CACHE[parentId];
+  if (!folderList) {
+    folderList = [];
+    // parentFolder.getFolders() คืนค่าเฉพาะโฟลเดอร์ที่ไม่ได้อยู่ในถังขยะอยู่แล้ว ไม่ต้องเรียก f.isTrashed() ซ้ำในลูป
+    const subFolders = parentFolder.getFolders();
+    while (subFolders.hasNext()) {
+      const f = subFolders.next();
+      const fName = f.getName();
+      const cleanName = normalizeStringFuzzy(fName);
+      folderList.push({
+        folder: f,
+        name: fName,
+        clean: cleanName,
+        noDiacritics: stripThaiDiacritics(cleanName),
+      });
+    }
+    FOLDER_CHILDREN_CACHE[parentId] = folderList;
+  }
+  return folderList;
+}
+
+/**
+ * ระบบ Auto-Heal (In-Memory): ตรวจสอบและย้ายโฟลเดอร์วันที่ที่อาจเคยถูกสร้างสลับที่ระหว่าง TH และ INTER
+ * Optimized: ตรวจสอบจาก Memory Cache ทันทีใน 0ms โดยไม่ต้องยิง DriveApp.getFoldersByName() ซ้ำในลูป
+ */
+function autoHealMisplacedDateFolders(thFolder, interFolder, dateInfo) {
+  if (!thFolder || !interFolder) return;
+  try {
+    const thList = getCachedSubFoldersList(thFolder);
+    const interList = getCachedSubFoldersList(interFolder);
+    const targetInterClean = dateInfo ? normalizeStringFuzzy(dateInfo.interFolderName) : null;
+    const targetThClean = dateInfo ? normalizeStringFuzzy(dateInfo.thFolderName) : null;
+
+    // รูปแบบชื่อวันที่ฝั่ง INTER: เช่น NOV 01,2026 หรือ 01 NOV 2026
+    const interDatePattern = /^(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+\d{1,2},?\s*\d{4}/i;
+    // รูปแบบชื่อวันที่ฝั่ง TH: เช่น 01 พ.ย. 69 หรือ 1 พย 69
+    const thDatePattern = /^\d{1,2}\s+(ม\.?ค\.?|ก\.?พ\.?|มี\.?ค\.?|เม\.?ย\.?|พ\.?ค\.?|มิ\.?ย\.?|ก\.?ค\.?|ส\.?ค\.?|ก\.?ย\.?|ต\.?ค\.?|พ\.?ย\.?|ธ\.?ค\.?)\s+\d{2,4}/i;
+
+    // 1. หากใน thFolder มีโฟลเดอร์ชื่อวันที่ของ INTER (เช่น NOV 01,2026) -> ย้ายกลับไป interFolder
+    for (let i = thList.length - 1; i >= 0; i--) {
+      const isInter = (targetInterClean && (thList[i].clean === targetInterClean || thList[i].name === dateInfo.interFolderName)) || interDatePattern.test(thList[i].name);
+      if (isInter) {
+        const wf = thList[i].folder;
+        Logger.log(`[Auto-Heal] ย้ายโฟลเดอร์ ${wf.getName()} จาก TH (${thFolder.getName()}) ไปยัง INTER (${interFolder.getName()})`);
+        try {
+          wf.moveTo(interFolder);
+        } catch (eM1) {
+          interFolder.addFolder(wf);
+          thFolder.removeFolder(wf);
+        }
+        const movedItem = thList.splice(i, 1)[0];
+        interList.push(movedItem);
+      }
+    }
+
+    // 2. หากใน interFolder มีโฟลเดอร์ชื่อวันที่ของ TH (เช่น 01 พ.ย. 69) -> ย้ายกลับไป thFolder
+    for (let i = interList.length - 1; i >= 0; i--) {
+      const isTh = (targetThClean && (interList[i].clean === targetThClean || interList[i].name === dateInfo.thFolderName)) || thDatePattern.test(interList[i].name);
+      if (isTh) {
+        const wf = interList[i].folder;
+        Logger.log(`[Auto-Heal] ย้ายโฟลเดอร์ ${wf.getName()} จาก INTER (${interFolder.getName()}) ไปยัง TH (${thFolder.getName()})`);
+        try {
+          wf.moveTo(thFolder);
+        } catch (eM2) {
+          thFolder.addFolder(wf);
+          interFolder.removeFolder(wf);
+        }
+        const movedItem = interList.splice(i, 1)[0];
+        thList.push(movedItem);
+      }
+    }
+  } catch (eHeal) {
+    Logger.log("[Auto-Heal] Error moving misplaced date folders: " + eHeal.message);
+  }
+}
 
 /**
  * ฟังก์ชันช่วยตรวจสอบและให้สิทธิ์การเข้าถึง (Authorization)
@@ -107,7 +248,12 @@ function extractFolderId(urlOrId) {
  * แปลงชื่อแผ่นงาน (เช่น "7 พย", "15 ธค", "5 มค") เป็นชื่อโฟลเดอร์ TH, INTER, และรหัสวันที่ (รองรับครบ 12 เดือน)
  */
 function parseDateFormats(sheetName) {
-  const match = sheetName.trim().match(/^(\d+)\s*([^\d\s]+)?/);
+  const cleanKey = (sheetName || "").toString().trim();
+  if (DATE_FORMAT_CACHE[cleanKey]) {
+    return DATE_FORMAT_CACHE[cleanKey];
+  }
+
+  const match = cleanKey.match(/^(\d+)\s*([^\d\s]+)?/);
   const day = match ? parseInt(match[1], 10) : 7;
   const padDay = day < 10 ? "0" + day : "" + day;
   const monthStr = match && match[2] ? match[2].trim() : "พย";
@@ -149,7 +295,7 @@ function parseDateFormats(sheetName) {
     }
   }
 
-  return {
+  const parsedResult = {
     dayNumber: day,
     padDay: padDay,
     padMonth: numMonth,
@@ -164,6 +310,8 @@ function parseDateFormats(sheetName) {
     // ตัวอย่าง: "07.11"
     interDateSuffix: `${padDay}.${numMonth}`,
   };
+  DATE_FORMAT_CACHE[cleanKey] = parsedResult;
+  return parsedResult;
 }
 
 /**
@@ -187,103 +335,111 @@ function normalizeStringFuzzy(str) {
  */
 function getCategoryInfoSmart(rawCategory) {
   const cat = (rawCategory || "").toString().trim();
+  if (CATEGORY_INFO_CACHE[cat]) {
+    return CATEGORY_INFO_CACHE[cat];
+  }
+
   const catLower = cat.toLowerCase();
   const catClean = stripThaiDiacritics(catLower).replace(/\s+/g, "");
+  let result = null;
 
   // สล็อต / เกมสล็อต / Slot
   if (catClean.includes("สลอต") || catLower.includes("slot")) {
-    return {
+    result = {
       thTarget: "สล็อต SLOT",
       interTarget: "SLOT",
       keywords: ["สล็อต", "slot", "สลอต", "เกมสล็อต"]
     };
   }
   // คาสิโน / บาคาร่า / Casino
-  if (catClean.includes("คาสโน") || catLower.includes("casino") || catClean.includes("บาคารา")) {
-    return {
+  else if (catClean.includes("คาสโน") || catLower.includes("casino") || catClean.includes("บาคารา")) {
+    result = {
       thTarget: "คาสิโน CASINO",
       interTarget: "CASINO",
       keywords: ["คาสิโน", "casino", "คาสโน", "บาคาร่า"]
     };
   }
   // บอล / ฟุตบอล / Football
-  if (catClean.includes("บอล") || catLower.includes("football") || catLower.includes("soccer")) {
-    return {
+  else if (catClean.includes("บอล") || catLower.includes("football") || catLower.includes("soccer")) {
+    result = {
       thTarget: "บอล FOOTBALL",
       interTarget: "FOOTBALL",
       keywords: ["บอล", "football", "ฟุตบอล", "soccer"]
     };
   }
   // มวย / มวยไทย / Boxing
-  if (catClean.includes("มวย") || catLower.includes("boxing")) {
-    return {
+  else if (catClean.includes("มวย") || catLower.includes("boxing")) {
+    result = {
       thTarget: "มวย BOXING",
       interTarget: "BOXING",
       keywords: ["มวย", "boxing", "มวยไทย"]
     };
   }
   // ไก่ชน / Cock Fighting
-  if (catClean.includes("ไกชน") || catClean.includes("ไก") || catLower.includes("cock")) {
-    return {
+  else if (catClean.includes("ไกชน") || catClean.includes("ไก") || catLower.includes("cock")) {
+    result = {
       thTarget: "ไก่ชน COCK FIGHTING",
       interTarget: "COCK FIGHTING",
       keywords: ["ไก่ชน", "ไก่", "cock"]
     };
   }
   // วัวชน / Cow Fighting
-  if (catClean.includes("ววชน") || catClean.includes("วว") || catLower.includes("cow")) {
-    return {
+  else if (catClean.includes("ววชน") || catClean.includes("วว") || catLower.includes("cow")) {
+    result = {
       thTarget: "วัวชน COW FIGHTING",
       interTarget: "COW FIGHTING",
       keywords: ["วัวชน", "วัว", "cow"]
     };
   }
   // หวย APB / Asia PowerBall / Lotto
-  if (catClean.includes("หวย") || catLower.includes("apb") || catLower.includes("lotto")) {
-    return {
+  else if (catClean.includes("หวย") || catLower.includes("apb") || catLower.includes("lotto")) {
+    result = {
       thTarget: "หวย APB",
       interTarget: "APB",
       keywords: ["หวย APB", "หวย", "apb", "lotto"]
     };
   }
   // UFA NEWS
-  if (catLower.includes("ufa") || catLower.includes("news")) {
-    return {
+  else if (catLower.includes("ufa") || catLower.includes("news")) {
+    result = {
       thTarget: "UFA NEWS",
       interTarget: "UFA NEWS",
       keywords: ["ufa news", "ufa", "news"]
     };
   }
   // แคมเปญ
-  if (catClean.includes("แคมเปญ") || catLower.includes("campaign")) {
-    return {
+  else if (catClean.includes("แคมเปญ") || catLower.includes("campaign")) {
+    result = {
       thTarget: "แคมเปญ",
       interTarget: "CAMPAIGN",
       keywords: ["แคมเปญ", "campaign"]
     };
   }
   // กิจกรรมกลาง
-  if (catClean.includes("กจกรรม") || catLower.includes("activity")) {
-    return {
+  else if (catClean.includes("กจกรรม") || catLower.includes("activity")) {
+    result = {
       thTarget: "กิจกรรมกลาง",
       interTarget: "MAIN ACTIVITY",
       keywords: ["กิจกรรมกลาง", "กิจกรรม", "activity"]
     };
   }
   // กีฬาอื่นๆ
-  if (catClean.includes("กฬา") || catLower.includes("sport")) {
-    return {
+  else if (catClean.includes("กฬา") || catLower.includes("sport")) {
+    result = {
       thTarget: "กีฬาอื่นๆ Other Sports",
       interTarget: "OTHER SPORTS",
       keywords: ["กีฬาอื่นๆ", "กีฬา", "sport"]
     };
+  } else {
+    result = {
+      thTarget: CATEGORY_MAP_TH[cat] || cat || "ทั่วไป",
+      interTarget: CATEGORY_MAP_INTER[cat] || cat || "GENERAL",
+      keywords: [cat]
+    };
   }
 
-  return {
-    thTarget: CATEGORY_MAP_TH[cat] || cat || "ทั่วไป",
-    interTarget: CATEGORY_MAP_INTER[cat] || cat || "GENERAL",
-    keywords: [cat]
-  };
+  CATEGORY_INFO_CACHE[cat] = result;
+  return result;
 }
 
 /**
@@ -295,26 +451,8 @@ function getOrCreateFolderSmart(parentFolder, targetName, aliases, matchOptions)
   const targetNoDiacritics = stripThaiDiacritics(targetClean);
   const cleanAliases = (aliases || []).map(a => normalizeStringFuzzy(a)).filter(Boolean);
 
-  const parentId = parentFolder.getId();
-  let folderList = FOLDER_CHILDREN_CACHE[parentId];
-
-  // ดึงรายการโฟลเดอร์ย่อยเฉพาะครั้งแรกที่ยังไม่อยู่ใน Memory Cache
-  if (!folderList) {
-    folderList = [];
-    const subFolders = parentFolder.getFolders();
-    while (subFolders.hasNext()) {
-      const f = subFolders.next();
-      const fName = f.getName();
-      const cleanName = normalizeStringFuzzy(fName);
-      folderList.push({
-        folder: f,
-        name: fName,
-        clean: cleanName,
-        noDiacritics: stripThaiDiacritics(cleanName),
-      });
-    }
-    FOLDER_CHILDREN_CACHE[parentId] = folderList;
-  }
+  // ดึงรายการโฟลเดอร์ย่อยผ่าน Memory Cache helper
+  const folderList = getCachedSubFoldersList(parentFolder);
 
   // Tier 1: ตรงเป๊ะ (ไม่สนตัวพิมพ์เล็ก-ใหญ่ และยุบช่องว่างเกิน)
   for (let i = 0; i < folderList.length; i++) {
@@ -570,7 +708,7 @@ function resolveBriefSlideUrl(title) {
   if (!cleanTitle) return "";
 
   const scriptCache = CacheService.getScriptCache();
-  const cacheKey = "RESOLVE_BRIEF_SLIDE_V3_" + Utilities.base64EncodeWebSafe(cleanTitle).slice(0, 60);
+  const cacheKey = "RESOLVE_BRIEF_SLIDE_V3_" + getSafeB64Key(cleanTitle, 60);
   try {
     const cached = scriptCache.get(cacheKey);
     if (cached) return cached;
@@ -606,7 +744,7 @@ function normalizeToPresentationUrl(rawUrl, briefTitle, scriptCache, memoryBrief
   }
 
   if (briefTitle) {
-    const cacheKey = "SLIDE_URL_V2_" + Utilities.base64EncodeWebSafe(briefTitle).slice(0, 60);
+    const cacheKey = "SLIDE_URL_V2_" + getSafeB64Key(briefTitle, 60);
     if (memoryBriefCache && memoryBriefCache[briefTitle] !== undefined) {
       return memoryBriefCache[briefTitle] || url;
     }
@@ -724,7 +862,7 @@ function findFolderByNameSmart(cellText, fallbackNames) {
  */
 function getCellSmartChipUri(spreadsheetId, sheetName, a1Notation) {
   try {
-    const token = ScriptApp.getOAuthToken();
+    const token = getFastOAuthToken();
     const encodedRange = encodeURIComponent(`'${sheetName}'!${a1Notation}`);
     const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?ranges=${encodedRange}&fields=sheets(data(rowData(values(chipRuns))))`;
     
@@ -765,7 +903,7 @@ function getCellSmartChipUri(spreadsheetId, sheetName, a1Notation) {
 function getSheetSmartChipsMap(spreadsheetId, sheetName, lastRow) {
   const chipMap = {};
   try {
-    const token = ScriptApp.getOAuthToken();
+    const token = getFastOAuthToken();
     const encodedRange = encodeURIComponent(`'${sheetName}'!A1:N${lastRow}`);
     const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?ranges=${encodedRange}&fields=sheets(data(rowData(values(chipRuns))))`;
     
@@ -810,10 +948,10 @@ function isInterMonthlyFolderName(name) {
   if (!name || typeof name !== "string") return false;
   const n = name.toUpperCase().trim();
   if (n.includes("INTER")) return true;
+  if (/^M\d{1,2}$/i.test(n) || /^INTER\s*M\d{1,2}$/i.test(n)) return true; // M11, M12 คือ INTER ประจำเดือน!
   if (/^\[\d{1,2}\]/.test(n)) return true;
   if (/^(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+\d{4}/i.test(n)) return true;
   if (/^\d{1,2}\s+(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+\d{4}/i.test(n)) return true;
-  if (n.includes("เดือน") && !n.includes("ใบขาย") && !n.includes("TH")) return true;
   return false;
 }
 
@@ -823,34 +961,97 @@ function isInterMonthlyFolderName(name) {
 function isThMonthlyFolderName(name) {
   if (!name || typeof name !== "string") return false;
   const n = name.toUpperCase().trim();
+  if (n.includes("เดือน")) return true; // "เดือน 11" คือ TH ประจำเดือน!
   if (n.includes("ใบขาย")) return true;
   if (n.includes("TH") && !n.includes("OTHER")) return true;
-  if (/^M\d{1,2}$/i.test(n) || /^TH\s*M\d{1,2}$/i.test(n)) return true;
   if (n.includes("พ.ย.") || n.includes("ธ.ค.") || n.includes("ต.ค.") || n.includes("ก.ย.") || n.includes("ส.ค.") || n.includes("ก.ค.") || n.includes("มิ.ย.") || n.includes("พ.ค.") || n.includes("เม.ย.") || n.includes("มี.ค.") || n.includes("ก.พ.") || n.includes("ม.ค.")) return true;
   return false;
 }
 
 /**
- * ฟังก์ชันช่วยดึง Folder จาก Cell อย่างแม่นยำ (ระบุเฉพาะเจาะจง ไม่ผ่าน Array Index ร่วม)
+ * ดึง URI ของ Smart Chip จากหลายเซลล์พร้อมกันใน 1 API Call โดยแยก Range อิสระ 100% (ไม่มีปัญหา Array Index เลื่อน)
  */
-function getDriveFolderFromExactCell(sheet, row, col, a1Notation) {
-  const ss = sheet.getParent();
-  const ssId = ss.getId();
-  const sheetName = sheet.getName();
+function getExactCellsSmartChipUrisBatch(spreadsheetId, sheetName, a1NotationList) {
+  const result = {};
+  if (!a1NotationList || a1NotationList.length === 0) return result;
 
-  // 1. ดึง Smart Chip URI ผ่าน Sheets API v4 โดยระบุเฉพาะเซลล์เดี่ยวเป๊ะๆ
   try {
-    const chipUri = getCellSmartChipUri(ssId, sheetName, a1Notation);
-    if (chipUri) {
-      const id = extractFolderId(chipUri);
-      if (id) {
-        try {
-          const f = DriveApp.getFolderById(id);
-          if (f && !f.isTrashed()) return f;
-        } catch (e) {}
+    if (typeof Sheets !== "undefined" && Sheets && Sheets.Spreadsheets && typeof Sheets.Spreadsheets.get === "function") {
+      try {
+        const ranges = a1NotationList.map(a1 => `'${sheetName}'!${a1}`);
+        const res = Sheets.Spreadsheets.get(spreadsheetId, {
+          ranges: ranges,
+          fields: "sheets(data(rowData(values(chipRuns))))"
+        });
+        const dataBlocks = res?.sheets?.[0]?.data || [];
+        for (let i = 0; i < a1NotationList.length; i++) {
+          const chips = dataBlocks[i]?.rowData?.[0]?.values?.[0]?.chipRuns;
+          if (chips && chips.length > 0) {
+            for (let k = 0; k < chips.length; k++) {
+              const uri = chips[k].chip?.richLinkProperties?.uri;
+              if (uri) {
+                result[a1NotationList[i]] = uri;
+                break;
+              }
+            }
+          }
+        }
+        return result;
+      } catch (eAdv) {}
+    }
+
+    const token = getFastOAuthToken();
+    const rangesParam = a1NotationList
+      .map(a1 => `ranges=${encodeURIComponent(`'${sheetName}'!${a1}`)}`)
+      .join("&");
+    const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?${rangesParam}&fields=sheets(data(rowData(values(chipRuns))))`;
+    const res = UrlFetchApp.fetch(apiUrl, {
+      method: "get",
+      headers: { "Authorization": "Bearer " + token },
+      muteHttpExceptions: true
+    });
+
+    if (res.getResponseCode() === 200) {
+      const data = JSON.parse(res.getContentText());
+      const dataBlocks = data.sheets?.[0]?.data || [];
+      for (let i = 0; i < a1NotationList.length; i++) {
+        const chips = dataBlocks[i]?.rowData?.[0]?.values?.[0]?.chipRuns;
+        if (chips && chips.length > 0) {
+          for (let k = 0; k < chips.length; k++) {
+            const uri = chips[k].chip?.richLinkProperties?.uri;
+            if (uri) {
+              result[a1NotationList[i]] = uri;
+              break;
+            }
+          }
+        }
       }
     }
-  } catch (eApi) {}
+  } catch (e) {
+    Logger.log("Error in getExactCellsSmartChipUrisBatch: " + e.message);
+  }
+  return result;
+}
+
+/**
+ * ฟังก์ชันช่วยดึง Folder จาก Cell อย่างแม่นยำ (ระบุเฉพาะเจาะจง ไม่ผ่าน Array Index ร่วม)
+ */
+function getDriveFolderFromExactCell(sheet, row, col, a1Notation, preFetchedChipUri) {
+  // 1. ตรวจสอบจาก Smart Chip URI ที่ดึงมาเฉพาะเซลล์นั้น
+  let chipUri = preFetchedChipUri;
+  if (chipUri === undefined) {
+    const ss = sheet.getParent();
+    chipUri = getCellSmartChipUri(ss.getId(), sheet.getName(), a1Notation);
+  }
+  if (chipUri) {
+    const id = extractFolderId(chipUri);
+    if (id) {
+      try {
+        const f = DriveApp.getFolderById(id);
+        if (f && !f.isTrashed()) return f;
+      } catch (e) {}
+    }
+  }
 
   // 2. ดึงจาก Range โดยตรง (Hyperlink, Formula, RichText, Value, Note)
   try {
@@ -889,50 +1090,54 @@ function getMonthlyRootFolders(sheet) {
   const sheetName = sheet.getName();
   const cache = CacheService.getScriptCache();
   // ใช้ Cache Key V4 เพื่อล้างแคชเก่าที่อาจมีค่าสลับกันทิ้งทันที 100%
-  const cacheKey = "ROOT_FOLDERS_V4_" + Utilities.base64EncodeWebSafe(sheetName).slice(0, 50);
+  const cacheKey = "ROOT_FOLDERS_V5_" + getSafeB64Key(sheetName, 50);
 
-  // ตรวจสอบจาก Cache ก่อนเพื่อความรวดเร็ว 0ms พร้อมตรวจสอบว่าไม่สลับกัน
+  // ตรวจสอบจาก Cache ก่อนเพื่อความรวดเร็ว 0ms (ค่าใน V4 ผ่านการตรวจสอบ Anti-Swap มาแล้ว ไม่ต้องยิง getName/isTrashed ซ้ำ)
   const cached = cache.get(cacheKey);
   if (cached) {
     try {
       const parsed = JSON.parse(cached);
-      let thF = parsed.thId ? DriveApp.getFolderById(parsed.thId) : null;
-      let interF = parsed.interId ? DriveApp.getFolderById(parsed.interId) : null;
-      if (thF && !thF.isTrashed()) {
-        const thN = thF.getName();
-        if (!isInterMonthlyFolderName(thN)) {
+      const thF = parsed.thId ? DriveApp.getFolderById(parsed.thId) : null;
+      const interF = parsed.interId ? DriveApp.getFolderById(parsed.interId) : null;
+      if (thF) {
+        if (!parsed.verified) {
+          if (!thF.isTrashed() && !isInterMonthlyFolderName(thF.getName())) {
+            return { thFolder: thF, interFolder: interF };
+          }
+        } else {
           return { thFolder: thF, interFolder: interF };
         }
       }
     } catch (e) {}
   }
 
-  // 1. ดึง F3 (TH) และ G3 (INTER) แยกกันอิสระ 100% เพื่อป้องกัน Index ใน Array เลื่อนหรือสลับตำแหน่ง
-  let thFolder = getDriveFolderFromExactCell(sheet, 3, 6, "F3");
-  let interFolder = getDriveFolderFromExactCell(sheet, 3, 7, "G3");
+  // 1. ดึง F3 (TH) และ G3 (INTER) ด้วย Multi-Range Batch ใน 1 API Call (แยก data[0] และ data[1] อิสระ 100%)
+  const chipUris = getExactCellsSmartChipUrisBatch(ssId, sheetName, ["F3", "G3"]);
+  let thFolder = getDriveFolderFromExactCell(sheet, 3, 6, "F3", chipUris["F3"] || null);
+  let interFolder = getDriveFolderFromExactCell(sheet, 3, 7, "G3", chipUris["G3"] || null);
 
   // 2. Fallback: หากยังไม่พบ ให้ค้นหาจากชื่อโฟลเดอร์จริงตามเดือน
   const dateInfo = parseDateFormats(sheetName);
   const thDynamicNames = [
+    `เดือน ${dateInfo.padMonth}`,
+    `เดือน ${parseInt(dateInfo.padMonth, 10)}`,
+    "เดือน 11",
     `ใบขาย ${dateInfo.thMonth} ${dateInfo.interMonth} ${dateInfo.thYear}`,
     `ใบขาย ${dateInfo.thMonth}`,
     "ใบขาย พ.ย. NOV 69",
-    `M${dateInfo.padMonth}`,
     `TH M${dateInfo.padMonth}`,
-    "M11",
     "TH M11",
   ];
   const interDynamicNames = [
+    `M${dateInfo.padMonth}`,
+    `M${parseInt(dateInfo.padMonth, 10)}`,
+    "M11",
     `[${dateInfo.padMonth}] ${dateInfo.interMonth} ${dateInfo.engYear}`,
     `${dateInfo.padMonth} ${dateInfo.interMonth} ${dateInfo.engYear}`,
     `[${dateInfo.padMonth}] ${dateInfo.interMonth}`,
     "[11] NOV 2026",
     "11 NOV 2026",
-    `เดือน ${dateInfo.padMonth}`,
-    `เดือน ${parseInt(dateInfo.padMonth, 10)}`,
-    "เดือน 11",
-    "INTER  เดือน 11",
-    "INTER เดือน 11",
+    "INTER",
   ];
 
   if (!thFolder) {
@@ -952,7 +1157,6 @@ function getMonthlyRootFolders(sheet) {
 
     const thLooksInter = isInterMonthlyFolderName(thName);
     const thLooksTh = isThMonthlyFolderName(thName);
-    const interLooksInter = isInterMonthlyFolderName(interName);
     const interLooksTh = isThMonthlyFolderName(interName);
 
     // หาก thFolder มีชื่อเป็น INTER และ interFolder มีชื่อเป็น TH (หรือยังไม่มี interFolder)
@@ -974,11 +1178,12 @@ function getMonthlyRootFolders(sheet) {
     throw new Error(`ไม่พบโฟลเดอร์ Google Drive ของ TH ในช่อง F3 (ค่าในช่องคือ "${f3Val}") กรุณาตรวจสอบว่ามีโฟลเดอร์ชื่อ M11 หรือ ใบขาย พ.ย. NOV 69 ใน Google Drive`);
   }
 
-  // บันทึกใส่ Cache 6 ชั่วโมง
+  // บันทึกใส่ Cache 6 ชั่วโมง พร้อมระบุ verified: true
   try {
     cache.put(cacheKey, JSON.stringify({
       thId: thFolder.getId(),
-      interId: interFolder ? interFolder.getId() : ""
+      interId: interFolder ? interFolder.getId() : "",
+      verified: true
     }), 21600);
   } catch (e) {}
 
@@ -999,7 +1204,7 @@ function fetchSheetNamesViaApiFast(spreadsheetId) {
   }
 
   try {
-    const token = ScriptApp.getOAuthToken();
+    const token = getFastOAuthToken();
     const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties.title`;
     const res = UrlFetchApp.fetch(apiUrl, {
       method: "get",
@@ -1014,13 +1219,10 @@ function fetchSheetNamesViaApiFast(spreadsheetId) {
     }
   } catch (e) {}
 
-  const allSheets = SpreadsheetApp.getActiveSpreadsheet().getSheets();
+  const allSheets = getFastActiveSpreadsheet().getSheets();
   return allSheets.map(s => s.getName()).filter(n => n.trim() !== "TEM");
 }
 
-/**
- * ดึงรายชื่อพนักงานและแท็บวันที่ทั้งหมด (Optimized: ไม่เรียก ss.getSheets() ที่ช้าเมื่อมี 52 แท็บ + แคช 30 นาที)
- */
 /**
  * ดึงข้อมูลเบื้องต้น: รายชื่อแท็บวันที่ทั้งหมด และรายชื่อพนักงานทุกคนที่มีในชีต
  * Optimized: สแกนครอบคลุมแท็บวันที่ทั้งหมด (35-40 แผ่นงาน) ด้วย Batch API รวดเดียว (~0.2 วินาที)
@@ -1036,8 +1238,7 @@ function getInitialMetadata(force) {
     }
   }
 
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const ssId = ss.getId();
+  const ssId = getFastSpreadsheetId();
   const sheetNames = fetchSheetNamesViaApiFast(ssId);
   const staffSet = { "ลูกหยี": true };
 
@@ -1055,7 +1256,10 @@ function getInitialMetadata(force) {
   if (typeof Sheets !== "undefined" && Sheets && Sheets.Spreadsheets && Sheets.Spreadsheets.Values && typeof Sheets.Spreadsheets.Values.batchGet === "function") {
     try {
       const ranges = sheetsToCheck.map(n => `'${n}'!J${CONFIG.DATA_START_ROW}:J150`);
-      const res = Sheets.Spreadsheets.Values.batchGet(ssId, { ranges: ranges });
+      const res = Sheets.Spreadsheets.Values.batchGet(ssId, {
+        ranges: ranges,
+        fields: "valueRanges(values)"
+      });
       if (res && res.valueRanges) {
         for (let i = 0; i < res.valueRanges.length; i++) {
           const rows = res.valueRanges[i].values || [];
@@ -1073,22 +1277,28 @@ function getInitialMetadata(force) {
     }
   }
 
-  // วิธีที่ 2: ดึงผ่าน UrlFetchApp โดยแบ่งเป็น Chunk ละ 25 แผ่นงาน (เพื่อความเร็วและไม่เกินขีดจำกัดความยาว URL)
+  // วิธีที่ 2: ดึงผ่าน UrlFetchApp.fetchAll แบบขนาน (Parallel Chunks) เพื่อความเร็วสูงสุดและไม่เกินขีดจำกัดความยาว URL
   if (!apiFetched) {
     try {
-      const token = ScriptApp.getOAuthToken();
-      const chunkSize = 25;
+      const token = getFastOAuthToken();
+      const chunkSize = 20;
+      const requests = [];
       for (let c = 0; c < sheetsToCheck.length; c += chunkSize) {
         const chunk = sheetsToCheck.slice(c, c + chunkSize);
         const rangesParam = chunk
           .map(n => `ranges=${encodeURIComponent(`'${n}'!J${CONFIG.DATA_START_ROW}:J150`)}`)
           .join("&");
-        const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${ssId}/values:batchGet?${rangesParam}`;
-        const res = UrlFetchApp.fetch(apiUrl, {
+        const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${ssId}/values:batchGet?${rangesParam}&fields=valueRanges(values)`;
+        requests.push({
+          url: apiUrl,
           method: "get",
           headers: { "Authorization": "Bearer " + token },
           muteHttpExceptions: true
         });
+      }
+      const responses = UrlFetchApp.fetchAll(requests);
+      for (let rIdx = 0; rIdx < responses.length; rIdx++) {
+        const res = responses[rIdx];
         if (res.getResponseCode() === 200) {
           const data = JSON.parse(res.getContentText());
           const valueRanges = data.valueRanges || [];
@@ -1111,6 +1321,7 @@ function getInitialMetadata(force) {
 
   // วิธีที่ 3: Fallback หาก API ไม่พร้อมใช้งาน ให้สแกน 15 แผ่นงานล่าสุดผ่าน SpreadsheetApp
   if (!apiFetched) {
+    const ss = getFastActiveSpreadsheet();
     const fallbackSheets = sheetsToCheck.slice(0, 15);
     for (let s = 0; s < fallbackSheets.length; s++) {
       const sheet = ss.getSheetByName(fallbackSheets[s]);
@@ -1142,11 +1353,11 @@ function getInitialMetadata(force) {
 }
 
 /**
- * ฟังก์ชันช่วยดึงเฉพาะรายชื่อแผ่นงานแบบเร็วพิเศษ (ดึงจาก Cache ก่อนเสมอ ถ้าไม่มีใช้ REST API แทน ss.getSheets())
+ * ฟังก์ชันช่วยดึงเฉพาะรายชื่อแผ่นงานแบบเร็วพิเศษ (ดึงจาก Cache INITIAL_METADATA_V6 ก่อนเสมอ ถ้าไม่มีใช้ REST API แทน ss.getSheets())
  */
 function getSheetNamesFast(ss) {
   const cache = CacheService.getScriptCache();
-  const cachedMeta = cache.get("INITIAL_METADATA_V5");
+  const cachedMeta = cache.get("INITIAL_METADATA_V6");
   if (cachedMeta) {
     try {
       const parsed = JSON.parse(cachedMeta);
@@ -1155,7 +1366,7 @@ function getSheetNamesFast(ss) {
       }
     } catch (e) {}
   }
-  const ssId = (ss || SpreadsheetApp.getActiveSpreadsheet()).getId();
+  const ssId = ss ? ss.getId() : getFastSpreadsheetId();
   return fetchSheetNamesViaApiFast(ssId);
 }
 
@@ -1174,25 +1385,54 @@ function fetchSheetsChecksumMapFast(spreadsheetId, sheetNames) {
     if (typeof Sheets !== "undefined" && Sheets && Sheets.Spreadsheets && Sheets.Spreadsheets.Values && typeof Sheets.Spreadsheets.Values.batchGet === "function") {
       try {
         const ranges = sheetNames.map(name => `'${name}'!C${startRow}:L${maxRow}`);
-        const res = Sheets.Spreadsheets.Values.batchGet(spreadsheetId, { ranges: ranges });
+        const res = Sheets.Spreadsheets.Values.batchGet(spreadsheetId, {
+          ranges: ranges,
+          fields: "valueRanges(values)"
+        });
         if (res && res.valueRanges) valueRanges = res.valueRanges;
       } catch (eAdv) {}
     }
 
     if (!valueRanges) {
-      const token = ScriptApp.getOAuthToken();
-      const rangesParam = sheetNames
-        .map(name => `ranges=${encodeURIComponent(`'${name}'!C${startRow}:L${maxRow}`)}`)
-        .join("&");
-      const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?${rangesParam}`;
-      const res = UrlFetchApp.fetch(apiUrl, {
-        method: "get",
-        headers: { "Authorization": "Bearer " + token },
-        muteHttpExceptions: true
-      });
-      if (res.getResponseCode() === 200) {
-        const data = JSON.parse(res.getContentText());
-        valueRanges = data.valueRanges || [];
+      const token = getFastOAuthToken();
+      const chunkSize = 20;
+      if (sheetNames.length <= chunkSize) {
+        const rangesParam = sheetNames
+          .map(name => `ranges=${encodeURIComponent(`'${name}'!C${startRow}:L${maxRow}`)}`)
+          .join("&");
+        const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?${rangesParam}&fields=valueRanges(values)`;
+        const res = UrlFetchApp.fetch(apiUrl, {
+          method: "get",
+          headers: { "Authorization": "Bearer " + token },
+          muteHttpExceptions: true
+        });
+        if (res.getResponseCode() === 200) {
+          const data = JSON.parse(res.getContentText());
+          valueRanges = data.valueRanges || [];
+        }
+      } else {
+        // กรณีเลือกดูพร้อมกันมากกว่า 20 วัน ยิงแบบ Parallel Chunks ด้วย fetchAll
+        const requests = [];
+        for (let c = 0; c < sheetNames.length; c += chunkSize) {
+          const chunk = sheetNames.slice(c, c + chunkSize);
+          const rangesParam = chunk
+            .map(name => `ranges=${encodeURIComponent(`'${name}'!C${startRow}:L${maxRow}`)}`)
+            .join("&");
+          requests.push({
+            url: `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?${rangesParam}&fields=valueRanges(values)`,
+            method: "get",
+            headers: { "Authorization": "Bearer " + token },
+            muteHttpExceptions: true
+          });
+        }
+        const responses = UrlFetchApp.fetchAll(requests);
+        valueRanges = [];
+        for (let r = 0; r < responses.length; r++) {
+          if (responses[r].getResponseCode() === 200) {
+            const data = JSON.parse(responses[r].getContentText());
+            if (data.valueRanges) valueRanges.push(...data.valueRanges);
+          }
+        }
       }
     }
 
@@ -1214,6 +1454,7 @@ function fetchSheetsChecksumMapFast(spreadsheetId, sheetNames) {
 /**
  * ฟังก์ชันช่วยดึงข้อมูลชีตแบบ Ultra-Fast ผ่าน Google Sheets API v4 ในครั้งเดียว
  * Optimized: ดึงเฉพาะช่วง C4:L (ตัดคอลัมน์ A,B และตัดแถว Header 1-3 ทิ้ง) ลดขนาด Payload กว่า 40%
+ * พร้อมรองรับ Parallel Chunk Fetching (UrlFetchApp.fetchAll) เมื่อดึงหลายแผ่นงานพร้อมกัน
  */
 function fetchSheetsGridDataFast(spreadsheetId, sheetNames) {
   const maxRow = sheetNames.length === 1 ? 200 : 150;
@@ -1233,23 +1474,54 @@ function fetchSheetsGridDataFast(spreadsheetId, sheetNames) {
   }
 
   try {
-    const token = ScriptApp.getOAuthToken();
-    const rangesParam = sheetNames
-      .map(name => `ranges=${encodeURIComponent(`'${name}'!C${startRow}:L${maxRow}`)}`)
-      .join("&");
-    const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?${rangesParam}&fields=${encodeURI(fields)}`;
+    const token = getFastOAuthToken();
+    const chunkSize = 6; // แบ่งยิงทีละ 6 แผ่นงานแบบขนาน (Parallel) เพื่อให้ Google ประมวลผลพร้อมกันเร็วที่สุด
+    if (sheetNames.length <= chunkSize) {
+      const rangesParam = sheetNames
+        .map(name => `ranges=${encodeURIComponent(`'${name}'!C${startRow}:L${maxRow}`)}`)
+        .join("&");
+      const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?${rangesParam}&fields=${encodeURI(fields)}`;
 
-    const res = UrlFetchApp.fetch(apiUrl, {
-      method: "get",
-      headers: { "Authorization": "Bearer " + token },
-      muteHttpExceptions: true
-    });
+      const res = UrlFetchApp.fetch(apiUrl, {
+        method: "get",
+        headers: { "Authorization": "Bearer " + token },
+        muteHttpExceptions: true
+      });
 
-    if (res.getResponseCode() !== 200) {
-      Logger.log("fetchSheetsGridDataFast error code: " + res.getResponseCode());
-      return null;
+      if (res.getResponseCode() !== 200) {
+        Logger.log("fetchSheetsGridDataFast error code: " + res.getResponseCode());
+        return null;
+      }
+      return JSON.parse(res.getContentText());
+    } else {
+      const requests = [];
+      for (let c = 0; c < sheetNames.length; c += chunkSize) {
+        const chunk = sheetNames.slice(c, c + chunkSize);
+        const rangesParam = chunk
+          .map(name => `ranges=${encodeURIComponent(`'${name}'!C${startRow}:L${maxRow}`)}`)
+          .join("&");
+        const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?${rangesParam}&fields=${encodeURI(fields)}`;
+        requests.push({
+          url: apiUrl,
+          method: "get",
+          headers: { "Authorization": "Bearer " + token },
+          muteHttpExceptions: true
+        });
+      }
+      const responses = UrlFetchApp.fetchAll(requests);
+      const combinedSheets = [];
+      for (let r = 0; r < responses.length; r++) {
+        if (responses[r].getResponseCode() !== 200) {
+          Logger.log("fetchSheetsGridDataFast chunk error code: " + responses[r].getResponseCode());
+          return null;
+        }
+        const part = JSON.parse(responses[r].getContentText());
+        if (part && part.sheets) {
+          combinedSheets.push(...part.sheets);
+        }
+      }
+      return { sheets: combinedSheets };
     }
-    return JSON.parse(res.getContentText());
   } catch (e) {
     Logger.log("fetchSheetsGridDataFast exception: " + e.message);
     return null;
@@ -1257,7 +1529,7 @@ function fetchSheetsGridDataFast(spreadsheetId, sheetNames) {
 }
 
 /**
- * เรียงลำดับชื่อแผ่นงานวันที่จากล่าสุดไปหาเก่าสุด
+ * เรียงลำดับชื่อแผ่นงานวันที่จากล่าสุดไปหาเก่าสุด (Optimized: แปลงค่าครั้งเดียวก่อน Sort ลดการรัน Regex จาก 600 ครั้งเหลือ 52 ครั้ง)
  */
 function sortSheetNamesDesc(sheets) {
   const monthWeights = {
@@ -1266,20 +1538,16 @@ function sortSheetNamesDesc(sheets) {
     "มิย": 6, "มิ.ย.": 6, "พค": 5, "พ.ค.": 5, "เมย": 4, "เม.ย.": 4,
     "มีค": 3, "มี.ค.": 3, "กพ": 2, "ก.พ.": 2, "มค": 1, "ม.ค.": 1
   };
-  return [...sheets].sort((a, b) => {
-    const parse = (str) => {
-      const match = str.trim().match(/^(\d+)\s*([^\d\s]+)?/);
-      if (!match) return { day: 0, mWeight: 0 };
+  return sheets
+    .map(name => {
+      const match = name.trim().match(/^(\d+)\s*([^\d\s]+)?/);
+      if (!match) return { name: name, day: 0, mWeight: 0 };
       const day = parseInt(match[1], 10);
       const mStr = (match[2] || "").trim();
-      const mWeight = monthWeights[mStr] || 0;
-      return { day, mWeight };
-    };
-    const pA = parse(a);
-    const pB = parse(b);
-    if (pA.mWeight !== pB.mWeight) return pB.mWeight - pA.mWeight;
-    return pB.day - pA.day;
-  });
+      return { name: name, day: day, mWeight: monthWeights[mStr] || 0 };
+    })
+    .sort((pA, pB) => (pA.mWeight !== pB.mWeight ? pB.mWeight - pA.mWeight : pB.day - pA.day))
+    .map(item => item.name);
 }
 
 /**
@@ -1385,16 +1653,39 @@ function fastFormatPresentationUrl(rawUrl) {
  * - วันไหนไม่มีการแก้ไข จะดึงจาก Cache ทันที (0ms) โดยไม่ต้องโหลด Smart Chips ใหม่
  */
 function getStaffTasks(assignee, targetSheet, pendingOnly, force) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const ssId = ss.getId();
+  const ssId = getFastSpreadsheetId();
   const scriptCache = CacheService.getScriptCache();
-  const allSheetNames = getSheetNamesFast(ss);
+
+  // หากระบุแผ่นงานมาชัดเจน สามารถรวบดึง INITIAL_METADATA_V6 พร้อมกับ SHEET_VER_ ใน CacheService.getAll รอบเดียวได้ทันที
+  let rawTargetList = [];
+  if (targetSheet && targetSheet !== "ALL") {
+    rawTargetList = targetSheet.split(",").map(s => s.trim()).filter(Boolean);
+  }
+
+  const initialCacheKeys = ["INITIAL_METADATA_V6"];
+  for (let i = 0; i < rawTargetList.length; i++) {
+    initialCacheKeys.push("SHEET_VER_" + getSafeB64Key(rawTargetList[i], 35));
+  }
+  const initialBatch = scriptCache.getAll(initialCacheKeys) || {};
+
+  let allSheetNames = null;
+  if (initialBatch["INITIAL_METADATA_V6"]) {
+    try {
+      const parsedMeta = JSON.parse(initialBatch["INITIAL_METADATA_V6"]);
+      if (parsedMeta && Array.isArray(parsedMeta.sheetNames) && parsedMeta.sheetNames.length > 0) {
+        allSheetNames = parsedMeta.sheetNames;
+      }
+    } catch (e) {}
+  }
+  if (!allSheetNames) {
+    allSheetNames = fetchSheetNamesViaApiFast(ssId);
+  }
 
   let targetSheetNames = [];
-  if (targetSheet && targetSheet !== "ALL") {
-    const rawList = targetSheet.split(",").map(s => s.trim()).filter(Boolean);
+  let verBatch = initialBatch;
+  if (rawTargetList.length > 0) {
     const validSet = new Set(allSheetNames);
-    targetSheetNames = rawList.filter(s => validSet.has(s));
+    targetSheetNames = rawTargetList.filter(s => validSet.has(s));
     if (targetSheetNames.length === 0) {
       return { success: false, error: `ไม่พบแผ่นงานชื่อ: ${targetSheet}` };
     }
@@ -1402,15 +1693,13 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force) {
     const sortedSheets = sortSheetNamesDesc(allSheetNames);
     const limitSheets = (assignee && assignee !== "ALL") ? 10 : 8;
     targetSheetNames = sortedSheets.slice(0, limitSheets);
+    const verKeys = targetSheetNames.map(s => "SHEET_VER_" + getSafeB64Key(s, 35));
+    verBatch = scriptCache.getAll(verKeys) || {};
   }
 
   // 1. คำนวณรหัส Checksum สดๆ จากชีตของทุกวันที่เลือก (ใช้เวลาเพียง ~0.1 วินาที)
   // หากใครแก้ข้อความ ชื่อคน สถานะ หรือเพิ่มแถวในวันไหน รหัส Checksum ของวันนั้นจะเปลี่ยนทันที!
   const liveChecksums = fetchSheetsChecksumMapFast(ssId, targetSheetNames);
-
-  // ดึงเลขเวอร์ชันของการอัปเดต Smart Chip (กรณีเปลี่ยนเฉพาะลิงก์ Smart Chip หรือ Note INTER)
-  const verKeys = targetSheetNames.map(s => "SHEET_VER_" + Utilities.base64EncodeWebSafe(s).slice(0, 35));
-  const verBatch = scriptCache.getAll(verKeys) || {};
 
   const sheetsTasksMap = {};
   const sheetsToFetchFromApi = [];
@@ -1419,7 +1708,7 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force) {
 
   for (let i = 0; i < targetSheetNames.length; i++) {
     const sName = targetSheetNames[i];
-    const b64Name = Utilities.base64EncodeWebSafe(sName).slice(0, 35);
+    const b64Name = getSafeB64Key(sName, 35);
     const ver = verBatch["SHEET_VER_" + b64Name] || "0";
     const hashSuffix = (liveChecksums && liveChecksums[sName]) ? ("_" + liveChecksums[sName] + "_" + ver) : "";
     const key = "FAST_TASKS_V5_" + b64Name + hashSuffix;
@@ -1445,13 +1734,12 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force) {
     sheetsToFetchFromApi.push(sName);
   }
 
-  // Memory Cache สำหรับจำลิงก์ใบบรีฟในรอบรันนี้
-  const briefSlideMemCache = {};
-
   // 3. ดึงข้อมูลเต็มรูปแบบ (พร้อม Smart Chips / Links / Notes) เฉพาะวันที่เพิ่งมีการเปลี่ยนแปลงเท่านั้น!
   if (sheetsToFetchFromApi.length > 0) {
     const apiData = fetchSheetsGridDataFast(ssId, sheetsToFetchFromApi);
     const cacheToPut = {};
+    const pendingBriefLookups = []; // เก็บรายการงานที่ต้องค้นหาลิงก์ใบบรีฟจาก Cache แบบ Batch รวดเดียว
+    const briefKeyToTitleMap = {};
 
     if (apiData && apiData.sheets && apiData.sheets.length > 0) {
       const COL_OFFSET = 3;
@@ -1506,25 +1794,11 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force) {
           const hasName = !!(uploadCellText && uploadCellText.trim() !== "");
           const hasLink = !!(uploadUrl && uploadUrl.trim() !== "");
           const isCompleted = (hasName && hasLink) ? (status.includes("เสร็จสิ้น") || uploadUrl !== "") : false;
-          let taskBriefLink = fastFormatPresentationUrl(currentBriefLink);
-          if (!taskBriefLink && currentBriefTitle) {
-            if (briefSlideMemCache[currentBriefTitle] !== undefined) {
-              taskBriefLink = briefSlideMemCache[currentBriefTitle];
-            } else {
-              try {
-                const bKey = "RESOLVE_BRIEF_SLIDE_V3_" + Utilities.base64EncodeWebSafe(currentBriefTitle).slice(0, 60);
-                const cachedSlide = scriptCache.get(bKey) || "";
-                briefSlideMemCache[currentBriefTitle] = cachedSlide;
-                if (cachedSlide) taskBriefLink = cachedSlide;
-              } catch (e) {
-                briefSlideMemCache[currentBriefTitle] = "";
-              }
-            }
-          }
+          const taskBriefLink = fastFormatPresentationUrl(currentBriefLink);
           const team = (vals[CONFIG.COL_TEAM - COL_OFFSET]?.formattedValue || "").toString().trim();
           const assignDate = vals[CONFIG.COL_ASSIGN_DATE - COL_OFFSET]?.formattedValue || "";
 
-          parsedSheetTasks.push({
+          const taskObj = {
             sheetName: sheetName,
             row: actualRowNumber,
             category: currentCategory || "ทั่วไป",
@@ -1540,13 +1814,40 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force) {
             assignDate: assignDate,
             status: status,
             isCompleted: isCompleted,
-          });
+          };
+
+          if (!taskBriefLink && currentBriefTitle) {
+            const bKey = "RESOLVE_BRIEF_SLIDE_V3_" + getSafeB64Key(currentBriefTitle, 60);
+            briefKeyToTitleMap[bKey] = currentBriefTitle;
+            pendingBriefLookups.push({ task: taskObj, cacheKey: bKey });
+          }
+
+          parsedSheetTasks.push(taskObj);
         }
 
         sheetsTasksMap[sheetName] = parsedSheetTasks;
+      }
+
+      // ดึงลิงก์ใบบรีฟจาก Cache แบบ Batch รวดเดียวด้วย getAll() (ลดการเรียก CacheService ทีละแถวเหลือเพียง 1 ครั้ง)
+      const uniqueBriefKeys = Object.keys(briefKeyToTitleMap);
+      if (uniqueBriefKeys.length > 0) {
+        try {
+          const cachedBriefs = scriptCache.getAll(uniqueBriefKeys) || {};
+          for (let b = 0; b < pendingBriefLookups.length; b++) {
+            const item = pendingBriefLookups[b];
+            if (cachedBriefs[item.cacheKey]) {
+              item.task.briefLink = cachedBriefs[item.cacheKey];
+            }
+          }
+        } catch (e) {}
+      }
+
+      // เตรียมข้อมูลที่สมบูรณ์แล้วลง Cache
+      for (let sIdx = 0; sIdx < apiData.sheets.length; sIdx++) {
+        const sheetName = apiData.sheets[sIdx].properties?.title || sheetsToFetchFromApi[sIdx];
         const cKey = cacheKeyMap[sheetName];
-        if (cKey) {
-          cacheToPut[cKey] = JSON.stringify(parsedSheetTasks);
+        if (cKey && sheetsTasksMap[sheetName]) {
+          cacheToPut[cKey] = JSON.stringify(sheetsTasksMap[sheetName]);
         }
       }
 
@@ -1559,6 +1860,7 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force) {
     } else {
       // Fallback: หาก Sheets API v4 ไม่พร้อมใช้งาน
       Logger.log("Falling back to SpreadsheetApp for: " + sheetsToFetchFromApi.join(", "));
+      const ss = getFastActiveSpreadsheet();
       for (let sIdx = 0; sIdx < sheetsToFetchFromApi.length; sIdx++) {
         const sName = sheetsToFetchFromApi[sIdx];
         const sheet = ss.getSheetByName(sName);
@@ -1620,25 +1922,11 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force) {
           const hasName = !!(uploadCellText && uploadCellText.trim() !== "");
           const hasLink = !!(uploadUrl && uploadUrl.trim() !== "");
           const isCompleted = (hasName && hasLink) ? (status.includes("เสร็จสิ้น") || uploadUrl !== "") : false;
-          let taskBriefLink = fastFormatPresentationUrl(currentBriefLink);
-          if (!taskBriefLink && currentBriefTitle) {
-            if (briefSlideMemCache[currentBriefTitle] !== undefined) {
-              taskBriefLink = briefSlideMemCache[currentBriefTitle];
-            } else {
-              try {
-                const bKey = "RESOLVE_BRIEF_SLIDE_V3_" + Utilities.base64EncodeWebSafe(currentBriefTitle).slice(0, 60);
-                const cachedSlide = scriptCache.get(bKey) || "";
-                briefSlideMemCache[currentBriefTitle] = cachedSlide;
-                if (cachedSlide) taskBriefLink = cachedSlide;
-              } catch (e) {
-                briefSlideMemCache[currentBriefTitle] = "";
-              }
-            }
-          }
+          const taskBriefLink = fastFormatPresentationUrl(currentBriefLink);
           const team = (values[rowIdx][CONFIG.COL_TEAM - 1] || "").toString().trim();
           const assignDate = values[rowIdx][CONFIG.COL_ASSIGN_DATE - 1] || "";
 
-          parsedSheetTasks.push({
+          const taskObj = {
             sheetName: sName,
             row: r,
             category: currentCategory || "ทั่วไป",
@@ -1654,13 +1942,38 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force) {
             assignDate: assignDate instanceof Date ? Utilities.formatDate(assignDate, "GMT+7", "dd/MM/yyyy") : assignDate,
             status: status,
             isCompleted: isCompleted,
-          });
+          };
+
+          if (!taskBriefLink && currentBriefTitle) {
+            const bKey = "RESOLVE_BRIEF_SLIDE_V3_" + getSafeB64Key(currentBriefTitle, 60);
+            briefKeyToTitleMap[bKey] = currentBriefTitle;
+            pendingBriefLookups.push({ task: taskObj, cacheKey: bKey });
+          }
+
+          parsedSheetTasks.push(taskObj);
         }
 
         sheetsTasksMap[sName] = parsedSheetTasks;
+      }
+
+      const uniqueBriefKeys = Object.keys(briefKeyToTitleMap);
+      if (uniqueBriefKeys.length > 0) {
+        try {
+          const cachedBriefs = scriptCache.getAll(uniqueBriefKeys) || {};
+          for (let b = 0; b < pendingBriefLookups.length; b++) {
+            const item = pendingBriefLookups[b];
+            if (cachedBriefs[item.cacheKey]) {
+              item.task.briefLink = cachedBriefs[item.cacheKey];
+            }
+          }
+        } catch (e) {}
+      }
+
+      for (let sIdx = 0; sIdx < sheetsToFetchFromApi.length; sIdx++) {
+        const sName = sheetsToFetchFromApi[sIdx];
         const cKey = cacheKeyMap[sName];
-        if (cKey) {
-          cacheToPut[cKey] = JSON.stringify(parsedSheetTasks);
+        if (cKey && sheetsTasksMap[sName]) {
+          cacheToPut[cKey] = JSON.stringify(sheetsTasksMap[sName]);
         }
       }
 
@@ -1799,7 +2112,7 @@ function writeSmartChipsBatchToSheet(spreadsheetId, sheet, updates) {
   // ขั้นตอนที่ 2: หากไม่มี Advanced Service ให้เรียกผ่าน UrlFetchApp ด้วย Sheets API v4
   if (!apiSuccess) {
     try {
-      const token = ScriptApp.getOAuthToken();
+      const token = getFastOAuthToken();
       const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`;
       const res = UrlFetchApp.fetch(apiUrl, {
         method: "post",
@@ -1886,7 +2199,7 @@ function setSafeStatusCompleted(sheet, row) {
  * Optimized: อ่านข้อมูลทั้งคอลัมน์ F ในครั้งเดียว (Batch Read) แทนการเรียก getRange() ในลูปทีละแถว
  */
 function convertSheetLinksToSmartChips(sheetName, specificRows) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getFastActiveSpreadsheet();
   const ssId = ss.getId();
   const sheet = sheetName ? ss.getSheetByName(sheetName) : ss.getActiveSheet();
   if (!sheet) return { success: false, error: "ไม่พบแผ่นงาน: " + sheetName };
@@ -1948,7 +2261,7 @@ function convertSheetLinksToSmartChips(sheetName, specificRows) {
     batchResult = writeSmartChipsBatchToSheet(ssId, sheet, updates);
     try {
       const scriptCache = CacheService.getScriptCache();
-      const b64Name = Utilities.base64EncodeWebSafe(sheet.getName()).slice(0, 35);
+      const b64Name = getSafeB64Key(sheet.getName(), 35);
       scriptCache.put("SHEET_VER_" + b64Name, Date.now().toString(), 21600);
     } catch (e) {}
   }
@@ -1970,7 +2283,7 @@ function convertSheetLinksToSmartChips(sheetName, specificRows) {
  * Optimized: ดึงข้อมูล Col F ทั้งคอลัมน์ล่วงหน้า (Batch Read) ไม่ต้องเรียก sheet.getRange() ในลูป
  */
 function createFoldersAndSyncBatch(payload) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getFastActiveSpreadsheet();
   const ssId = ss.getId();
   const scriptCache = CacheService.getScriptCache();
   const tasks = payload.tasks || [];
@@ -1990,6 +2303,8 @@ function createFoldersAndSyncBatch(payload) {
 
   const results = [];
   let lastBatchResult = null;
+  const verToPut = {};
+  const nowVerStr = Date.now().toString();
 
   for (const sName in grouped) {
     const sheet = ss.getSheetByName(sName);
@@ -2001,38 +2316,9 @@ function createFoldersAndSyncBatch(payload) {
     // 2. คำนวณชื่อโฟลเดอร์วันที่ตามมาตรฐาน
     const dateInfo = parseDateFormats(sName);
 
-    // ระบบ Auto-Heal: ตรวจสอบและย้ายโฟลเดอร์วันที่ที่อาจเคยถูกสร้างสลับที่ในรอบก่อนหน้า
+    // ระบบ Auto-Heal (In-Memory): ตรวจสอบและย้ายโฟลเดอร์วันที่ที่อาจเคยถูกสร้างสลับที่ในรอบก่อนหน้า
     if (interFolder) {
-      try {
-        const wrongInTh = thFolder.getFoldersByName(dateInfo.interFolderName);
-        while (wrongInTh.hasNext()) {
-          const wf = wrongInTh.next();
-          if (!wf.isTrashed()) {
-            Logger.log(`[Auto-Heal] ย้ายโฟลเดอร์ ${wf.getName()} จาก TH ไปยัง INTER`);
-            try { wf.moveTo(interFolder); } catch (eM1) {
-              interFolder.addFolder(wf);
-              thFolder.removeFolder(wf);
-            }
-            delete FOLDER_CHILDREN_CACHE[thFolder.getId()];
-            delete FOLDER_CHILDREN_CACHE[interFolder.getId()];
-          }
-        }
-        const wrongInInter = interFolder.getFoldersByName(dateInfo.thFolderName);
-        while (wrongInInter.hasNext()) {
-          const wf = wrongInInter.next();
-          if (!wf.isTrashed()) {
-            Logger.log(`[Auto-Heal] ย้ายโฟลเดอร์ ${wf.getName()} จาก INTER ไปยัง TH`);
-            try { wf.moveTo(thFolder); } catch (eM2) {
-              thFolder.addFolder(wf);
-              interFolder.removeFolder(wf);
-            }
-            delete FOLDER_CHILDREN_CACHE[thFolder.getId()];
-            delete FOLDER_CHILDREN_CACHE[interFolder.getId()];
-          }
-        }
-      } catch (eHeal) {
-        Logger.log("[Auto-Heal] Error moving misplaced date folders: " + eHeal.message);
-      }
+      autoHealMisplacedDateFolders(thFolder, interFolder, dateInfo);
     }
 
     const thDateAliases = [sName, `${dateInfo.dayNumber} พ.ย. 69`, `${dateInfo.padDay} พย 69`, `${dateInfo.dayNumber} พย 69`];
@@ -2057,12 +2343,12 @@ function createFoldersAndSyncBatch(payload) {
     const thCatFolderCache = {};
     const interCatFolderCache = {};
 
-    // อ่านข้อมูล Col F เฉพาะ Values และ Notes ซึ่งรวดเร็วระดับมิลลิวินาที (ตัด getRichTextValues และ getFormulas ทั้งแผ่นที่ช้าออก)
-    const maxTaskRow = Math.max(...sheetTasks.map(t => t.row || CONFIG.DATA_START_ROW), sheet.getLastRow());
-    let colFValues = [], colFNotes = [];
+    // อ่านข้อมูล Col F เฉพาะถึงแถวสูงสุดที่มีในรายการงานที่เลือก (ไม่ต้องเรียก sheet.getLastRow() และไม่อ่านแถวเกินความจำเป็น)
+    const maxTaskRow = Math.max(...sheetTasks.map(t => t.row || CONFIG.DATA_START_ROW));
+    let colFRange = null, colFValues = [], colFNotes = [], colFRichTexts = null;
     if (maxTaskRow >= CONFIG.DATA_START_ROW) {
       const numRows = maxTaskRow - CONFIG.DATA_START_ROW + 1;
-      const colFRange = sheet.getRange(CONFIG.DATA_START_ROW, CONFIG.COL_UPLOAD_LINK, numRows, 1);
+      colFRange = sheet.getRange(CONFIG.DATA_START_ROW, CONFIG.COL_UPLOAD_LINK, numRows, 1);
       colFValues = colFRange.getValues();
       colFNotes = colFRange.getNotes();
     }
@@ -2105,6 +2391,7 @@ function createFoldersAndSyncBatch(payload) {
 
       // 5. โฟลเดอร์งานฝั่ง TH
       let thTaskFolder = null;
+      let currentThFolderName = "";
       let existingThFolderId = null;
 
       if (task.existingUrl) {
@@ -2116,7 +2403,11 @@ function createFoldersAndSyncBatch(payload) {
           existingThFolderId = extractFolderId(cellVal);
         } else if (cellVal) {
           try {
-            const singleRich = sheet.getRange(row, CONFIG.COL_UPLOAD_LINK).getRichTextValue();
+            // ดึง RichTextValues ทั้งคอลัมน์เฉพาะครั้งแรกที่มีแถวจำเป็นต้องใช้ (Lazy Batch Load 0 N+1)
+            if (!colFRichTexts && colFRange) {
+              colFRichTexts = colFRange.getRichTextValues();
+            }
+            const singleRich = colFRichTexts ? colFRichTexts[rowOffset][0] : null;
             const extracted = extractCellLinkAndTitle(cellVal, singleRich, "");
             if (extracted.link) {
               existingThFolderId = extractFolderId(extracted.link);
@@ -2130,9 +2421,11 @@ function createFoldersAndSyncBatch(payload) {
           const existingF = DriveApp.getFolderById(existingThFolderId);
           if (existingF && !existingF.isTrashed()) {
             thTaskFolder = existingF;
+            currentThFolderName = thTaskFolder.getName();
             // เปลี่ยนชื่อเฉพาะเมื่อผู้ใช้สั่งเปลี่ยนชื่อใหม่จริงๆ (isRename)
-            if (isRename && requestedName && thTaskFolder.getName() !== requestedName) {
+            if (isRename && requestedName && currentThFolderName !== requestedName) {
               thTaskFolder.setName(requestedName);
+              currentThFolderName = requestedName;
             }
           }
         } catch (e) {
@@ -2149,9 +2442,15 @@ function createFoldersAndSyncBatch(payload) {
         thTaskFolder = getOrCreateFolderSmart(thCatFolder, searchName, thAliases, {
           taskNo: task.no
         });
-        // ถ้าโฟลเดอร์นี้มีอยู่เดิมบน Google Drive และผู้ใช้สั่งเปลี่ยนชื่อใหม่ (isRename) ค่อยเปลี่ยนชื่อ
-        if (isRename && requestedName && thTaskFolder && thTaskFolder.getName() !== requestedName) {
-          try { thTaskFolder.setName(requestedName); } catch (e) {}
+        if (thTaskFolder) {
+          currentThFolderName = thTaskFolder.getName();
+          // ถ้าโฟลเดอร์นี้มีอยู่เดิมบน Google Drive และผู้ใช้สั่งเปลี่ยนชื่อใหม่ (isRename) ค่อยเปลี่ยนชื่อ
+          if (isRename && requestedName && currentThFolderName !== requestedName) {
+            try {
+              thTaskFolder.setName(requestedName);
+              currentThFolderName = requestedName;
+            } catch (e) {}
+          }
         }
       }
 
@@ -2164,8 +2463,8 @@ function createFoldersAndSyncBatch(payload) {
         finalTaskName = requestedName;
       } else if (isCustomName && requestedName) {
         finalTaskName = requestedName;
-      } else if (thTaskFolder) {
-        finalTaskName = thTaskFolder.getName();
+      } else if (currentThFolderName) {
+        finalTaskName = currentThFolderName;
       } else {
         finalTaskName = searchName;
       }
@@ -2175,7 +2474,7 @@ function createFoldersAndSyncBatch(payload) {
       // 6. โฟลเดอร์งานฝั่ง INTER
       let interUrl = "";
       if (interCatFolder) {
-        const interTaskName = `${task.no || 1} (${dateInfo.interDateSuffix})`;
+        const interTaskName = `${task.no || 1} (${dateInfo.interDateSuffix})`.trim();
         const interAliases = [
           `${task.no || 1}`,
           `${task.no || 1} ${dateInfo.dayNumber}.${parseInt(dateInfo.padMonth, 10)}`,
@@ -2194,8 +2493,8 @@ function createFoldersAndSyncBatch(payload) {
               const existingInterF = DriveApp.getFolderById(existingInterId);
               if (existingInterF && !existingInterF.isTrashed()) {
                 interTaskFolder = existingInterF;
-                if (interTaskFolder.getName() !== interTaskName.trim()) {
-                  interTaskFolder.setName(interTaskName.trim());
+                if (interTaskFolder.getName() !== interTaskName) {
+                  interTaskFolder.setName(interTaskName);
                 }
               }
             } catch (e) {}
@@ -2206,8 +2505,8 @@ function createFoldersAndSyncBatch(payload) {
           interTaskFolder = getOrCreateFolderSmart(interCatFolder, interTaskName, interAliases, {
             taskNo: task.no
           });
-          if (interTaskFolder && interTaskFolder.getName() !== interTaskName.trim()) {
-            try { interTaskFolder.setName(interTaskName.trim()); } catch (e) {}
+          if (interTaskFolder && interTaskFolder.getName() !== interTaskName) {
+            try { interTaskFolder.setName(interTaskName); } catch (e) {}
           }
         }
         interUrl = interTaskFolder ? interTaskFolder.getUrl() : "";
@@ -2233,12 +2532,17 @@ function createFoldersAndSyncBatch(payload) {
     // 7. เขียน Smart Chip + Note + เปลี่ยนสถานะลงชีตแบบ Batch รวดเดียว
     lastBatchResult = writeSmartChipsBatchToSheet(ssId, sheet, sheetUpdates);
 
-    // 8. อัปเดตเวอร์ชัน Cache ของแผ่นงานนี้เพื่อให้ข้อมูล Smart Chip และ Note ใหม่พร้อมใช้งานทันที 100%
-    try {
-      const b64Name = Utilities.base64EncodeWebSafe(sName).slice(0, 35);
-      scriptCache.put("SHEET_VER_" + b64Name, Date.now().toString(), 21600);
-    } catch (e) {}
+    // 8. เตรียมอัปเดตเวอร์ชัน Cache ของแผ่นงานนี้
+    const b64Name = getSafeB64Key(sName, 35);
+    verToPut["SHEET_VER_" + b64Name] = nowVerStr;
   }
+
+  // บันทึก SHEET_VER_ ของทุกแผ่นงานที่แก้ไขในคำสั่งเดียว (Batch PutAll)
+  try {
+    if (Object.keys(verToPut).length > 0) {
+      scriptCache.putAll(verToPut, 21600);
+    }
+  } catch (e) {}
 
   return {
     success: true,
@@ -2259,8 +2563,7 @@ function doGet(e) {
       const force = e.parameter.force === "true";
       data = getInitialMetadata(force);
     } else if (action === "getSheets") {
-      const ss = SpreadsheetApp.getActiveSpreadsheet();
-      const sheetNames = getSheetNamesFast(ss);
+      const sheetNames = getSheetNamesFast(null);
       data = { success: true, sheets: sheetNames };
     } else if (action === "getTasks") {
       const assignee = e.parameter.assignee || "";
@@ -2301,7 +2604,7 @@ function doGet(e) {
  * Optimized: ดึงข้อมูลคอลัมน์ C..F รวดเดียว (Batch Read) แทนการเรียก getRange() ในลูปทุกแถว
  */
 function repairMissingThLinks(sheetName) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getFastActiveSpreadsheet();
   const sheet = sheetName ? ss.getSheetByName(sheetName) : ss.getActiveSheet();
   if (!sheet) return { success: false, error: "ไม่พบแผ่นงาน: " + sheetName };
 
@@ -2372,7 +2675,7 @@ function repairMissingThLinks(sheetName) {
     writeSmartChipsBatchToSheet(ss.getId(), sheet, updates);
     try {
       const scriptCache = CacheService.getScriptCache();
-      const b64Name = Utilities.base64EncodeWebSafe(sheet.getName()).slice(0, 35);
+      const b64Name = getSafeB64Key(sheet.getName(), 35);
       scriptCache.put("SHEET_VER_" + b64Name, Date.now().toString(), 21600);
     } catch (e) {}
   }
@@ -2390,7 +2693,7 @@ function repairMissingThLinks(sheetName) {
  * เพื่อป้องกันพนักงานคนอื่นสร้างโฟลเดอร์ผิดฟอร์แมต หรือสร้างโฟลเดอร์ซ้ำซ้อน
  */
 function precreateFoldersBatch(payload) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getFastActiveSpreadsheet();
   const sName = payload.sheetName || "";
   const sheet = ss.getSheetByName(sName);
   if (!sheet) {
@@ -2433,40 +2736,9 @@ function precreateFoldersBatch(payload) {
     const day = days[d];
     const dayDateInfo = parseDateFormats(`${day} ${monthStr}`);
 
-    // ระบบ Auto-Heal: ตรวจสอบและย้ายโฟลเดอร์วันที่ที่อาจเคยถูกสร้างสลับที่ในรอบก่อนหน้า
+    // ระบบ Auto-Heal (In-Memory): ตรวจสอบและย้ายโฟลเดอร์วันที่ที่อาจเคยถูกสร้างสลับที่ในรอบก่อนหน้า (ใช้เวลา 0ms)
     if (interFolder) {
-      try {
-        // หากใน thFolder มีโฟลเดอร์ชื่อภาษาอังกฤษ (เช่น NOV 01,2026) -> ย้ายไป interFolder ให้ถูกต้อง
-        const wrongInTh = thFolder.getFoldersByName(dayDateInfo.interFolderName);
-        while (wrongInTh.hasNext()) {
-          const wf = wrongInTh.next();
-          if (!wf.isTrashed()) {
-            Logger.log(`[Auto-Heal] ย้ายโฟลเดอร์ ${wf.getName()} จาก TH ไปยัง INTER`);
-            try { wf.moveTo(interFolder); } catch (eM1) {
-              interFolder.addFolder(wf);
-              thFolder.removeFolder(wf);
-            }
-            delete FOLDER_CHILDREN_CACHE[thFolder.getId()];
-            delete FOLDER_CHILDREN_CACHE[interFolder.getId()];
-          }
-        }
-        // หากใน interFolder มีโฟลเดอร์ชื่อภาษาไทย (เช่น 01 พ.ย. 69) -> ย้ายไป thFolder ให้ถูกต้อง
-        const wrongInInter = interFolder.getFoldersByName(dayDateInfo.thFolderName);
-        while (wrongInInter.hasNext()) {
-          const wf = wrongInInter.next();
-          if (!wf.isTrashed()) {
-            Logger.log(`[Auto-Heal] ย้ายโฟลเดอร์ ${wf.getName()} จาก INTER ไปยัง TH`);
-            try { wf.moveTo(thFolder); } catch (eM2) {
-              thFolder.addFolder(wf);
-              interFolder.removeFolder(wf);
-            }
-            delete FOLDER_CHILDREN_CACHE[thFolder.getId()];
-            delete FOLDER_CHILDREN_CACHE[interFolder.getId()];
-          }
-        }
-      } catch (eHeal) {
-        Logger.log("[Auto-Heal] Error moving misplaced date folders: " + eHeal.message);
-      }
+      autoHealMisplacedDateFolders(thFolder, interFolder, dayDateInfo);
     }
 
     // ก. สร้าง/ดึงโฟลเดอร์วันที่ฝั่ง TH
