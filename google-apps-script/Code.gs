@@ -1331,7 +1331,7 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force) {
  * ฟังก์ชันช่วยเขียน Smart Chip แท้ๆ (Google Drive Chip) + Note + เปลี่ยนสถานะ ลงใน Google Sheets ด้วย Sheets API v4
  */
 function writeSmartChipsBatchToSheet(spreadsheetId, sheet, updates) {
-  if (!updates || updates.length === 0) return;
+  if (!updates || updates.length === 0) return { success: false, error: "No updates" };
   const sheetId = sheet.getSheetId();
 
   // 1. สร้าง Requests สำหรับเขียน Smart Chip (chipRuns) โดยเฉพาะ โดยไม่ปะปนกับช่องสถานะหรือช่องอื่น
@@ -1368,16 +1368,22 @@ function writeSmartChipsBatchToSheet(spreadsheetId, sheet, updates) {
   });
 
   let apiSuccess = false;
+  let errorDetail = "";
+  let successMethod = "";
 
   // ขั้นตอนที่ 1: ยิงผ่าน Google Sheets Advanced Service (หากผู้ใช้เปิดใช้ Service Sheets ใน Apps Script)
   if (typeof Sheets !== "undefined" && Sheets.Spreadsheets && Sheets.Spreadsheets.batchUpdate) {
     try {
       Sheets.Spreadsheets.batchUpdate({ requests: chipRequests }, spreadsheetId);
       apiSuccess = true;
+      successMethod = "Sheets.Spreadsheets.batchUpdate";
       Logger.log("เขียน Smart Chip ผ่าน Sheets Advanced Service สำเร็จ");
     } catch (eSheets) {
+      errorDetail += "SheetsService: " + eSheets.message + "; ";
       Logger.log("Sheets.Spreadsheets.batchUpdate error: " + eSheets.message);
     }
+  } else {
+    errorDetail += "SheetsService: undefined; ";
   }
 
   // ขั้นตอนที่ 2: หากไม่มี Advanced Service หรือยิงไม่ผ่าน ให้ยิงผ่าน REST API (UrlFetchApp) ด้วย OAuth Token
@@ -1394,18 +1400,21 @@ function writeSmartChipsBatchToSheet(spreadsheetId, sheet, updates) {
       });
       if (res.getResponseCode() === 200) {
         apiSuccess = true;
+        successMethod = "UrlFetchApp";
         Logger.log("เขียน Smart Chip ผ่าน UrlFetchApp Sheets API v4 สำเร็จ");
       } else {
+        errorDetail += `UrlFetchApp (${res.getResponseCode()}): ${res.getContentText()}; `;
         Logger.log("UrlFetchApp batchUpdate response " + res.getResponseCode() + ": " + res.getContentText());
       }
     } catch (eFetch) {
+      errorDetail += "UrlFetchApp: " + eFetch.message + "; ";
       Logger.log("UrlFetchApp batchUpdate error: " + eFetch.message);
     }
   }
 
   // Fallback: หากทั้งสองทางด้านบนไม่สำเร็จ ให้วาง RichText Hyperlink เพื่อไม่ให้งานสะดุด
   if (!apiSuccess) {
-    Logger.log("จำเป็นต้องใช้ Fallback วาง RichText Hyperlink แทน");
+    Logger.log("จำเป็นต้องใช้ Fallback วาง RichText Hyperlink แทน: " + errorDetail);
     for (let i = 0; i < updates.length; i++) {
       const u = updates[i];
       try {
@@ -1444,6 +1453,12 @@ function writeSmartChipsBatchToSheet(spreadsheetId, sheet, updates) {
       }
     }
   }
+
+  return {
+    success: apiSuccess,
+    method: successMethod,
+    error: errorDetail
+  };
 }
 
 /**
@@ -1518,8 +1533,9 @@ function convertSheetLinksToSmartChips(sheetName, specificRows) {
     }
   }
 
+  let batchResult = null;
   if (updates.length > 0) {
-    writeSmartChipsBatchToSheet(ssId, sheet, updates);
+    batchResult = writeSmartChipsBatchToSheet(ssId, sheet, updates);
     try {
       const scriptCache = CacheService.getScriptCache();
       const cKey = "FAST_TASKS_V3_" + Utilities.base64EncodeWebSafe(sheet.getName()).slice(0, 50);
@@ -1528,8 +1544,12 @@ function convertSheetLinksToSmartChips(sheetName, specificRows) {
   }
 
   return {
-    success: true,
-    message: `แปลงลิงก์เป็น Smart Chip การ์ดสวยงามสำเร็จ ${updates.length} รายการ`,
+    success: batchResult ? batchResult.success : true,
+    method: batchResult ? batchResult.method : "",
+    error: batchResult ? batchResult.error : "",
+    message: batchResult && !batchResult.success
+      ? `ไม่สามารถเขียน Smart Chip ได้: ${batchResult.error}`
+      : `แปลงลิงก์เป็น Smart Chip การ์ดสวยงามสำเร็จ ${updates.length} รายการ`,
     count: updates.length,
     rows: updates.map(function(u) { return u.row; })
   };
@@ -1713,7 +1733,7 @@ function createFoldersAndSyncBatch(payload) {
     }
 
     // 7. เขียน Smart Chip + Note + เปลี่ยนสถานะลงชีตแบบ Batch รวดเดียว
-    writeSmartChipsBatchToSheet(ssId, sheet, sheetUpdates);
+    const batchResult = writeSmartChipsBatchToSheet(ssId, sheet, sheetUpdates);
 
     // 8. ล้าง Cache ของแผ่นงานนี้เพื่อให้ข้อมูลใหม่พร้อมใช้งาน
     try {
@@ -1724,7 +1744,10 @@ function createFoldersAndSyncBatch(payload) {
 
   return {
     success: true,
-    message: `สร้างโฟลเดอร์ TH & INTER และวาง Smart Chip สำเร็จ ${results.length} รายการ`,
+    smartChipResult: batchResult,
+    message: batchResult && !batchResult.success
+      ? `สร้างโฟลเดอร์สำเร็จ แต่วางชิปไม่สำเร็จ: ${batchResult.error}`
+      : `สร้างโฟลเดอร์ TH & INTER และวาง Smart Chip สำเร็จ ${results.length} รายการ`,
     updatedTasks: results,
   };
 }
