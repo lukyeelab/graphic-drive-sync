@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTasksQuerySchema } from "@/lib/validations/task";
 
+interface CacheEntry {
+  data: any;
+  timestamp: number;
+}
+
+const serverTasksCache = new Map<string, CacheEntry>();
+const CACHE_TTL_MS = 60000; // แคชฝั่งเซิร์ฟเวอร์ 60 วินาทีเพื่อความเร็วระดับ 0ms
+
 // ฟังก์ชันจัดเรียงแท็บวันที่ (เช่น 15 พย -> 1 พย -> 31 ตค -> 1 ตค)
 function sortThaiDateSheets(sheets: string[]): string[] {
   const monthWeights: Record<string, number> = {
@@ -170,11 +178,19 @@ export async function GET(req: NextRequest) {
     }
 
     // กรณีดึงรายการงาน (action=getTasks)
+    const isForce = searchParams.get("force") === "true";
+    const cacheKey = `tasks_${sheet}_${assignee || "ALL"}_${pendingOnly}`;
+    const cachedEntry = serverTasksCache.get(cacheKey);
+
+    if (!isForce && cachedEntry && Date.now() - cachedEntry.timestamp < CACHE_TTL_MS) {
+      return NextResponse.json(cachedEntry.data);
+    }
+
     const targetUrl = new URL(gasUrl);
     targetUrl.searchParams.set("action", action);
     targetUrl.searchParams.set("sheet", sheet);
     targetUrl.searchParams.set("assignee", assignee);
-    targetUrl.searchParams.set("pendingOnly", pendingOnly);
+    targetUrl.searchParams.set("pendingOnly", "false"); // ดึงทั้งเสร็จและไม่เสร็จเสมอ เพื่อให้สลับดูได้ใน 0ms
 
     const res = await fetch(targetUrl.toString(), {
       method: "GET",
@@ -188,6 +204,49 @@ export async function GET(req: NextRequest) {
     try {
       const data = JSON.parse(responseText);
       if (data && data.success && Array.isArray(data.tasks)) {
+        // Fallback อัจฉริยะ: หากเลือก sheet=ALL แต่ GAS ยังส่งมาไม่ครบทุกแผ่นงาน
+        // Next.js จะดึงแผ่นงาน พ.ย. อื่นๆ ที่มีงาน (เช่น 7 พย, 8 พย, 6 พย, 3 พย, 2 พย, 1 พย) มาผสานรวมให้ทันที
+        if (sheet === "ALL") {
+          const scannedSheets = new Set(data.tasks.map((t: any) => t.sheetName));
+          const prioritySheets = ["11 พย", "8 พย", "7 พย", "6 พย", "3 พย", "2 พย", "1 พย"].filter(
+            (s) => !scannedSheets.has(s)
+          );
+
+          if (prioritySheets.length > 0) {
+            const extraBatches = await Promise.all(
+              prioritySheets.map(async (sName) => {
+                try {
+                  const sUrl = new URL(gasUrl);
+                  sUrl.searchParams.set("action", "getTasks");
+                  sUrl.searchParams.set("sheet", sName);
+                  sUrl.searchParams.set("assignee", assignee);
+                  sUrl.searchParams.set("pendingOnly", "false");
+                  const sRes = await fetch(sUrl.toString(), { redirect: "follow", cache: "no-store" });
+                  const sJson = await sRes.json();
+                  return sJson.tasks || [];
+                } catch {
+                  return [];
+                }
+              })
+            );
+
+            for (const batch of extraBatches) {
+              if (Array.isArray(batch) && batch.length > 0) {
+                data.tasks.push(...batch);
+              }
+            }
+          }
+        }
+
+        // กรองความซ้ำซ้อนของงานตาม sheetName และ row
+        const seenKeys = new Set<string>();
+        data.tasks = data.tasks.filter((t: any) => {
+          const key = `${t.sheetName}_${t.row}`;
+          if (seenKeys.has(key)) return false;
+          seenKeys.add(key);
+          return true;
+        });
+
         data.tasks = data.tasks.map((t: any) => {
           let briefLink = (t.briefLink || "").trim();
           let briefTitle = (t.briefTitle || "").trim();
@@ -195,7 +254,6 @@ export async function GET(req: NextRequest) {
           const isUrl = briefLink.startsWith("http://") || briefLink.startsWith("https://");
           if (!isUrl && briefLink) {
             if (!briefTitle) briefTitle = briefLink;
-            // ถ้ายังไม่ได้ URL ตรง ให้ตั้งเป็นลิงก์ค้นหาไฟล์ใน Google Drive
             briefLink = `https://drive.google.com/drive/search?q=${encodeURIComponent(briefTitle)}`;
           } else if (!briefLink && briefTitle) {
             briefLink = `https://drive.google.com/drive/search?q=${encodeURIComponent(briefTitle)}`;
@@ -206,6 +264,22 @@ export async function GET(req: NextRequest) {
             briefLink,
             briefTitle: briefTitle || "เปิดใบบรีฟ",
           };
+        });
+
+        // จัดเรียง: วันที่ล่าสุดขึ้นก่อน และงานที่ยังไม่เสร็จขึ้นก่อน
+        data.tasks.sort((a: any, b: any) => {
+          if (a.isCompleted !== b.isCompleted) {
+            return a.isCompleted ? 1 : -1;
+          }
+          return (b.row || 0) - (a.row || 0);
+        });
+
+        data.totalFound = data.tasks.length;
+
+        // บันทึกเข้า Memory Cache 60 วินาที
+        serverTasksCache.set(cacheKey, {
+          data,
+          timestamp: Date.now(),
         });
       }
       return NextResponse.json(data);
