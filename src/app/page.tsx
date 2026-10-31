@@ -1044,7 +1044,7 @@ export default function HomePage() {
     <div className="min-h-screen bg-[#F2F2F7] flex flex-col font-sans pb-32">
       {/* iOS 18 Frosted Glass Header */}
       <header className="bg-[#F2F2F7]/80 backdrop-blur-2xl border-b border-black/[0.06] sticky top-0 z-30 transition-all">
-        <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+        <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-[12px] bg-gradient-to-b from-[#1C1C1E] to-[#000000] flex items-center justify-center text-white shadow-xs ring-1 ring-black/5">
               <FolderPlus className="w-5 h-5 text-white" />
@@ -1099,7 +1099,7 @@ export default function HomePage() {
       </header>
 
       {/* Main Container */}
-      <main className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full flex flex-col gap-6">
+      <main className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full flex flex-col gap-6">
         {/* Error Alert Box */}
         {errorMessage && (
           <div className="bg-[#FF3B30]/10 border border-[#FF3B30]/20 rounded-2xl p-4 flex items-start gap-3">
@@ -1683,7 +1683,7 @@ export default function HomePage() {
                         <th className="py-3.5 px-3 whitespace-nowrap text-[#8E8E93] border-b border-[#E5E5EA]">หมวดหมู่</th>
                         <th className="py-3.5 px-2.5 w-32 max-w-[150px] whitespace-nowrap text-[#8E8E93] border-b border-[#E5E5EA]">ใบบรีฟ</th>
                         <th className="py-3.5 px-2 w-12 text-center text-[#8E8E93] border-b border-[#E5E5EA]">No.</th>
-                        <th className="py-3.5 px-4 min-w-[340px] text-[#8E8E93] border-b border-[#E5E5EA]">ชื่องาน/ชื่อโฟลเดอร์ (TH)</th>
+                        <th className="py-3.5 px-4 min-w-[270px] text-[#8E8E93] border-b border-[#E5E5EA]">ชื่องาน/ชื่อโฟลเดอร์ (TH)</th>
                         <th className="py-3.5 px-3 whitespace-nowrap text-center text-[#8E8E93] border-b border-[#E5E5EA]">วันที่จ่ายงาน</th>
                         <th className="py-3.5 px-3 w-28 whitespace-nowrap text-center text-[#8E8E93] border-b border-[#E5E5EA]">สถานะ</th>
                         <th className="py-3.5 px-3 w-40 whitespace-nowrap text-center text-[#8E8E93] border-b border-[#E5E5EA]">ลิงก์โฟลเดอร์ (TH & INTER)</th>
@@ -1780,7 +1780,7 @@ export default function HomePage() {
                             <td className={`py-3.5 px-2 text-center font-mono font-bold text-[#1C1C1E] ${cellBorder}`}>
                               {task.no || "-"}
                             </td>
-                            <td className={`py-3.5 px-4 min-w-[340px] ${cellBorder}`} onClick={(e) => e.stopPropagation()}>
+                            <td className={`py-3.5 px-4 min-w-[270px] ${cellBorder}`} onClick={(e) => e.stopPropagation()}>
                               {(() => {
                                 const currentInput = (taskNamesMap[key] ?? "").trim();
                                 const originalName = (task.taskName || "").trim();
