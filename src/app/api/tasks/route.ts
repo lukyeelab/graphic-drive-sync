@@ -177,6 +177,33 @@ export async function GET(req: NextRequest) {
       });
     }
 
+    // กรณีแปลงลิงก์ในชีตให้เป็น Smart Chip (action=fixSmartChips)
+    if (action === "fixSmartChips") {
+      const rowsParam = searchParams.get("rows") || "";
+      const targetUrl = new URL(gasUrl);
+      targetUrl.searchParams.set("action", "fixSmartChips");
+      targetUrl.searchParams.set("sheet", sheet);
+      if (rowsParam) targetUrl.searchParams.set("rows", rowsParam);
+
+      const res = await fetch(targetUrl.toString(), {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        redirect: "follow",
+        cache: "no-store",
+      });
+
+      const responseText = await res.text();
+      try {
+        const data = JSON.parse(responseText);
+        return NextResponse.json(data);
+      } catch {
+        return NextResponse.json(
+          { success: false, error: "Google Apps Script ตอบกลับไม่ใช่ JSON: " + responseText.slice(0, 200) },
+          { status: 502 }
+        );
+      }
+    }
+
     // กรณีดึงรายการงาน (action=getTasks)
     const isForce = searchParams.get("force") === "true";
     if (isForce) {

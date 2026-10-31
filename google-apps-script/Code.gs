@@ -1333,31 +1333,11 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force) {
 function writeSmartChipsBatchToSheet(spreadsheetId, sheet, updates) {
   if (!updates || updates.length === 0) return;
   const sheetId = sheet.getSheetId();
-  const requests = [];
 
-  for (let i = 0; i < updates.length; i++) {
-    const u = updates[i];
+  // 1. สร้าง Requests สำหรับเขียน Smart Chip (chipRuns) โดยเฉพาะ โดยไม่ปะปนกับช่องสถานะหรือช่องอื่น
+  const chipRequests = updates.map(function(u) {
     const rowIndex = u.row - 1; // 0-based index สำหรับ Sheets API v4
-
-    // 1. เขียน Smart Chip แท้ๆ (chipRuns) โดยใช้ตัวยึด '@' ตามมาตรฐาน Google Sheets API
-    const cellDataF = {
-      userEnteredValue: { stringValue: "@" },
-      chipRuns: [
-        {
-          startIndex: 0,
-          chip: {
-            richLinkProperties: {
-              uri: u.thUrl
-            }
-          }
-        }
-      ]
-    };
-    if (u.interUrl) {
-      cellDataF.note = `INTER: ${u.interUrl}`;
-    }
-
-    requests.push({
+    return {
       updateCells: {
         range: {
           sheetId: sheetId,
@@ -1366,70 +1346,193 @@ function writeSmartChipsBatchToSheet(spreadsheetId, sheet, updates) {
           startColumnIndex: CONFIG.COL_UPLOAD_LINK - 1,
           endColumnIndex: CONFIG.COL_UPLOAD_LINK
         },
-        rows: [{ values: [cellDataF] }],
-        fields: u.interUrl ? "userEnteredValue,chipRuns,note" : "userEnteredValue,chipRuns"
-      }
-    });
-
-    // 2. เปลี่ยนสถานะ Col L เป็น "เสร็จสิ้น ✅" ใน Batch เดียวกัน
-    requests.push({
-      updateCells: {
-        range: {
-          sheetId: sheetId,
-          startRowIndex: rowIndex,
-          endRowIndex: rowIndex + 1,
-          startColumnIndex: CONFIG.COL_STATUS - 1,
-          endColumnIndex: CONFIG.COL_STATUS
-        },
         rows: [{
           values: [{
-            userEnteredValue: { stringValue: "เสร็จสิ้น ✅" }
+            userEnteredValue: { stringValue: "@" },
+            chipRuns: [
+              {
+                startIndex: 0,
+                chip: {
+                  richLinkProperties: {
+                    uri: u.thUrl
+                  }
+                }
+              }
+            ],
+            textFormatRuns: []
           }]
         }],
-        fields: "userEnteredValue"
+        fields: "userEnteredValue,chipRuns,textFormatRuns"
       }
-    });
-  }
+    };
+  });
 
   let apiSuccess = false;
-  try {
-    const token = ScriptApp.getOAuthToken();
-    const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`;
-    const res = UrlFetchApp.fetch(apiUrl, {
-      method: "post",
-      contentType: "application/json",
-      headers: { "Authorization": "Bearer " + token },
-      payload: JSON.stringify({ requests: requests }),
-      muteHttpExceptions: true
-    });
-    if (res.getResponseCode() === 200) {
+
+  // ขั้นตอนที่ 1: ยิงผ่าน Google Sheets Advanced Service (หากผู้ใช้เปิดใช้ Service Sheets ใน Apps Script)
+  if (typeof Sheets !== "undefined" && Sheets.Spreadsheets && Sheets.Spreadsheets.batchUpdate) {
+    try {
+      Sheets.Spreadsheets.batchUpdate({ requests: chipRequests }, spreadsheetId);
       apiSuccess = true;
-    } else {
-      Logger.log("SmartChip batchUpdate fallback: " + res.getContentText());
+      Logger.log("เขียน Smart Chip ผ่าน Sheets Advanced Service สำเร็จ");
+    } catch (eSheets) {
+      Logger.log("Sheets.Spreadsheets.batchUpdate error: " + eSheets.message);
     }
-  } catch (e) {
-    Logger.log("SmartChip batchUpdate error: " + e.message);
   }
 
-  // Fallback: หาก Sheets API ไม่ยอมรับ chipRuns ในบางสิทธิ์ ให้วาง RichText Hyperlink แทนเพื่อให้งานไม่สะดุด
+  // ขั้นตอนที่ 2: หากไม่มี Advanced Service หรือยิงไม่ผ่าน ให้ยิงผ่าน REST API (UrlFetchApp) ด้วย OAuth Token
   if (!apiSuccess) {
+    try {
+      const token = ScriptApp.getOAuthToken();
+      const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`;
+      const res = UrlFetchApp.fetch(apiUrl, {
+        method: "post",
+        contentType: "application/json",
+        headers: { "Authorization": "Bearer " + token },
+        payload: JSON.stringify({ requests: chipRequests }),
+        muteHttpExceptions: true
+      });
+      if (res.getResponseCode() === 200) {
+        apiSuccess = true;
+        Logger.log("เขียน Smart Chip ผ่าน UrlFetchApp Sheets API v4 สำเร็จ");
+      } else {
+        Logger.log("UrlFetchApp batchUpdate response " + res.getResponseCode() + ": " + res.getContentText());
+      }
+    } catch (eFetch) {
+      Logger.log("UrlFetchApp batchUpdate error: " + eFetch.message);
+    }
+  }
+
+  // Fallback: หากทั้งสองทางด้านบนไม่สำเร็จ ให้วาง RichText Hyperlink เพื่อไม่ให้งานสะดุด
+  if (!apiSuccess) {
+    Logger.log("จำเป็นต้องใช้ Fallback วาง RichText Hyperlink แทน");
     for (let i = 0; i < updates.length; i++) {
       const u = updates[i];
-      const cellF = sheet.getRange(u.row, CONFIG.COL_UPLOAD_LINK);
-      const richValue = SpreadsheetApp.newRichTextValue()
-        .setText(u.taskName)
-        .setLinkUrl(u.thUrl)
-        .build();
-      cellF.setRichTextValue(richValue);
-      if (u.interUrl) {
-        try { cellF.setNote(`INTER: ${u.interUrl}`); } catch (e) {}
-      }
-      const cellL = sheet.getRange(u.row, CONFIG.COL_STATUS);
-      try { cellL.setValue("เสร็จสิ้น ✅"); } catch (e1) {
-        try { cellL.setValue("เสร็จสิ้น"); } catch (e2) {}
+      try {
+        const cellF = sheet.getRange(u.row, CONFIG.COL_UPLOAD_LINK);
+        const richValue = SpreadsheetApp.newRichTextValue()
+          .setText(u.taskName)
+          .setLinkUrl(u.thUrl)
+          .build();
+        cellF.setRichTextValue(richValue);
+      } catch (eRich) {
+        Logger.log(`ตั้งค่า RichText แถว ${u.row} ไม่สำเร็จ: ${eRich.message}`);
       }
     }
   }
+
+  // ขั้นตอนที่ 3: ตั้งค่า Note สำหรับ INTER Link และเปลี่ยนสถานะ Col L เป็น "เสร็จสิ้น" แยกออกมาต่างหาก
+  // ป้องกันไม่ให้ Data Validation หรือ Note ขัดขวางการสร้าง Smart Chip
+  for (let i = 0; i < updates.length; i++) {
+    const u = updates[i];
+    if (u.interUrl) {
+      try {
+        sheet.getRange(u.row, CONFIG.COL_UPLOAD_LINK).setNote(`INTER: ${u.interUrl}`);
+      } catch (eNote) {
+        Logger.log(`ตั้งค่า Note แถว ${u.row} ไม่สำเร็จ: ${eNote.message}`);
+      }
+    }
+
+    const cellL = sheet.getRange(u.row, CONFIG.COL_STATUS);
+    try {
+      cellL.setValue("เสร็จสิ้น ✅");
+    } catch (e1) {
+      try {
+        cellL.setValue("เสร็จสิ้น");
+      } catch (e2) {
+        Logger.log(`ตั้งค่าสถานะแถว ${u.row} ไม่สำเร็จ: ${e2.message}`);
+      }
+    }
+  }
+}
+
+/**
+ * ฟังก์ชันแปลงลิงก์ที่มีอยู่แล้วในคอลัมน์ Col F ให้กลายเป็น Google Drive Smart Chip การ์ดสวยงาม
+ */
+function convertSheetLinksToSmartChips(sheetName, specificRows) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ssId = ss.getId();
+  const sheet = sheetName ? ss.getSheetByName(sheetName) : ss.getActiveSheet();
+  if (!sheet) return { success: false, error: "ไม่พบแผ่นงาน: " + sheetName };
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < CONFIG.DATA_START_ROW) {
+    return { success: true, message: "ไม่มีข้อมูลงานในแผ่นงานนี้", count: 0 };
+  }
+
+  const updates = [];
+  let rowsToCheck = [];
+  if (specificRows && specificRows.length > 0) {
+    rowsToCheck = specificRows;
+  } else {
+    for (let r = CONFIG.DATA_START_ROW; r <= lastRow; r++) {
+      rowsToCheck.push(r);
+    }
+  }
+
+  for (let i = 0; i < rowsToCheck.length; i++) {
+    const r = rowsToCheck[i];
+    if (r < CONFIG.DATA_START_ROW || r > lastRow) continue;
+
+    const cellF = sheet.getRange(r, CONFIG.COL_UPLOAD_LINK);
+    const cellVal = (cellF.getValue() || "").toString().trim();
+    const cellNote = cellF.getNote() || "";
+    
+    // ดึง Link ของ TH จาก RichText หรือ Formula หรือ Value
+    let thUrl = "";
+    const rich = cellF.getRichTextValue();
+    if (rich) {
+      thUrl = rich.getLinkUrl() || "";
+      if (!thUrl && rich.getRuns()) {
+        const runs = rich.getRuns();
+        for (let j = 0; j < runs.length; j++) {
+          const runUrl = runs[j].getLinkUrl();
+          if (runUrl) { thUrl = runUrl; break; }
+        }
+      }
+    }
+    if (!thUrl) {
+      const formula = cellF.getFormula();
+      if (formula && formula.includes("HYPERLINK")) {
+        const match = formula.match(/HYPERLINK\(\s*["']([^"']+)["']/i);
+        if (match && match[1]) thUrl = match[1];
+      }
+    }
+    if (!thUrl && cellVal.startsWith("http")) {
+      thUrl = cellVal;
+    }
+
+    if (thUrl && thUrl.includes("drive.google.com")) {
+      let interUrl = "";
+      const noteMatch = cellNote.match(/INTER:\s*(https:\/\/[^\s]+)/i);
+      if (noteMatch && noteMatch[1]) {
+        interUrl = noteMatch[1];
+      }
+
+      updates.push({
+        row: r,
+        taskName: cellVal || `งานแถวที่ ${r}`,
+        thUrl: thUrl,
+        interUrl: interUrl
+      });
+    }
+  }
+
+  if (updates.length > 0) {
+    writeSmartChipsBatchToSheet(ssId, sheet, updates);
+    try {
+      const scriptCache = CacheService.getScriptCache();
+      const cKey = "FAST_TASKS_V3_" + Utilities.base64EncodeWebSafe(sheet.getName()).slice(0, 50);
+      scriptCache.remove(cKey);
+    } catch (e) {}
+  }
+
+  return {
+    success: true,
+    message: `แปลงลิงก์เป็น Smart Chip การ์ดสวยงามสำเร็จ ${updates.length} รายการ`,
+    count: updates.length,
+    rows: updates.map(function(u) { return u.row; })
+  };
 }
 
 /**
@@ -1647,6 +1750,11 @@ function doGet(e) {
       const title = e.parameter.title || "";
       const slideUrl = resolveBriefSlideUrl(title);
       data = { success: true, url: slideUrl };
+    } else if (action === "fixSmartChips") {
+      const sheetName = e.parameter.sheet || "";
+      const rowsParam = e.parameter.rows || "";
+      const rows = rowsParam ? rowsParam.split(",").map(Number).filter(Boolean) : [];
+      data = convertSheetLinksToSmartChips(sheetName, rows);
     } else {
       data = { success: false, error: "Invalid action" };
     }
@@ -1671,6 +1779,8 @@ function doPost(e) {
     let data;
     if (action === "createFolders") {
       data = createFoldersAndSyncBatch(postData);
+    } else if (action === "fixSmartChips") {
+      data = convertSheetLinksToSmartChips(postData.sheetName, postData.rows);
     } else {
       data = { success: false, error: "Invalid POST action" };
     }

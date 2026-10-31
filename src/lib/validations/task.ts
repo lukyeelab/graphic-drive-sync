@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const getTasksQuerySchema = z.object({
-  action: z.enum(["getTasks", "getMetadata"]).default("getTasks"),
+  action: z.enum(["getTasks", "getMetadata", "fixSmartChips"]).default("getTasks"),
   sheet: z.string().optional(),
   assignee: z.string().optional(),
   pendingOnly: z.enum(["true", "false"]).optional(),
