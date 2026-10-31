@@ -201,12 +201,13 @@ export async function GET(req: NextRequest) {
 
     // 1. กรณีเลือก "ALL" หรือไม่ได้ระบุ
     if (requestedSheets.includes("ALL") || requestedSheets.length === 0) {
+      console.log(`[API /tasks] Calling GAS for sheet=ALL, assignee=${assignee}...`);
+      const t0 = Date.now();
       const targetUrl = new URL(gasUrl);
       targetUrl.searchParams.set("action", action);
       targetUrl.searchParams.set("sheet", "ALL");
       targetUrl.searchParams.set("assignee", assignee);
       targetUrl.searchParams.set("pendingOnly", "false");
-      if (isForce) targetUrl.searchParams.set("force", "true");
 
       const res = await fetch(targetUrl.toString(), {
         method: "GET",
@@ -215,46 +216,18 @@ export async function GET(req: NextRequest) {
         cache: "no-store",
       });
 
+      console.log(`[API /tasks] GAS fetch finished in ${Date.now() - t0}ms, status=${res.status}`);
       const responseText = await res.text();
+      console.log(`[API /tasks] GAS text length=${responseText.length}`);
       try {
         const data = JSON.parse(responseText);
         if (data && data.success && Array.isArray(data.tasks)) {
           allRawTasks = data.tasks;
           isSuccess = true;
-
-          // Fallback อัจฉริยะ: ดึงแผ่นงาน พ.ย. อื่นๆ ที่อาจยังไม่อยู่ในแคชของ GAS
-          const scannedSheets = new Set(data.tasks.map((t: any) => t.sheetName));
-          const prioritySheets = ["11 พย", "8 พย", "7 พย", "6 พย", "3 พย", "2 พย", "1 พย"].filter(
-            (s) => !scannedSheets.has(s)
-          );
-
-          if (prioritySheets.length > 0) {
-            const extraBatches = await Promise.all(
-              prioritySheets.map(async (sName) => {
-                try {
-                  const sUrl = new URL(gasUrl);
-                  sUrl.searchParams.set("action", "getTasks");
-                  sUrl.searchParams.set("sheet", sName);
-                  sUrl.searchParams.set("assignee", assignee);
-                  sUrl.searchParams.set("pendingOnly", "false");
-                  if (isForce) sUrl.searchParams.set("force", "true");
-                  const sRes = await fetch(sUrl.toString(), { redirect: "follow", cache: "no-store" });
-                  const sJson = await sRes.json();
-                  return sJson.tasks || [];
-                } catch {
-                  return [];
-                }
-              })
-            );
-
-            for (const batch of extraBatches) {
-              if (Array.isArray(batch) && batch.length > 0) {
-                allRawTasks.push(...batch);
-              }
-            }
-          }
         }
-      } catch {}
+      } catch (e: any) {
+        console.error("[API /tasks] JSON parse error:", e);
+      }
     } 
     // 2. กรณีเลือกแผ่นงานเดียว (Direct Fetch)
     else if (requestedSheets.length === 1) {

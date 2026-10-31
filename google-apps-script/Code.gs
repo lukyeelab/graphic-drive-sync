@@ -1070,7 +1070,7 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force) {
     }
   } else {
     const sortedSheets = sortSheetNamesDesc(allSheetNames);
-    const limitSheets = (assignee && assignee !== "ALL") ? 20 : 8;
+    const limitSheets = (assignee && assignee !== "ALL") ? 10 : 8;
     targetSheetNames = sortedSheets.slice(0, limitSheets);
   }
 
@@ -1149,19 +1149,6 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force) {
           }
 
           const isCompleted = status.includes("เสร็จสิ้น") || (uploadUrl !== "" && uploadCellText !== "");
-          // หากสถานะเสร็จสิ้นและมีชื่อโฟลเดอร์ แต่ยังไม่ได้ลิงก์ ให้ค้นหาโฟลเดอร์ใน Drive ทันที
-          if (!uploadUrl && uploadCellText && isCompleted) {
-            try {
-              const fIter = DriveApp.getFoldersByName(uploadCellText);
-              while (fIter.hasNext()) {
-                const f = fIter.next();
-                if (!f.isTrashed()) {
-                  uploadUrl = f.getUrl();
-                  break;
-                }
-              }
-            } catch (e) {}
-          }
           let taskBriefLink = fastFormatPresentationUrl(currentBriefLink);
           if (!taskBriefLink && currentBriefTitle) {
             try {
@@ -1260,18 +1247,6 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force) {
           }
 
           const isCompleted = status.includes("เสร็จสิ้น") || (uploadUrl !== "" && uploadCellText !== "");
-          if (!uploadUrl && uploadCellText && isCompleted) {
-            try {
-              const fIter = DriveApp.getFoldersByName(uploadCellText);
-              while (fIter.hasNext()) {
-                const f = fIter.next();
-                if (!f.isTrashed()) {
-                  uploadUrl = f.getUrl();
-                  break;
-                }
-              }
-            } catch (e) {}
-          }
           let taskBriefLink = fastFormatPresentationUrl(currentBriefLink);
           if (!taskBriefLink && currentBriefTitle) {
             try {

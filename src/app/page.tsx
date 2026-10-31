@@ -158,14 +158,10 @@ export default function HomePage() {
       }
     });
 
-    // อัปเดต State ตรงตามข้อมูลสดจริงจาก Google Sheets ทันที (ไม่เก็บค่าเก่าที่ถูกลบไปแล้ว)
+    // อัปเดต State ตรงตามข้อมูลสดจริงจาก Google Sheets ทันที (ไม่เก็บแคชลิงก์ที่ถูกลบไปแล้ว)
     setTaskNamesMap(nameMap);
     setSelectedTaskKeys(pendingKeys);
     setFolderLinksMap(incomingLinks);
-
-    try {
-      localStorage.setItem("gds_folder_links", JSON.stringify(incomingLinks));
-    } catch (e) {}
   };
 
   // ดึงงานของแผ่นงานมารอไว้ล่วงหน้าเงียบๆ (Prefetch)
@@ -279,7 +275,8 @@ export default function HomePage() {
     try {
       const sheetsParam = sheetsArray.join(",");
       const queryAssignee = sheetsArray.includes("ALL") ? targetAssignee : "ALL";
-      const forceQuery = forceLoading ? "&force=true" : "";
+      // สำหรับโหมด ALL ไม่ส่ง force=true เพื่อให้ดึงข้อมูลเร็วระดับ 1-2 วินาที ไม่ติด Timeout
+      const forceQuery = (forceLoading && !sheetsArray.includes("ALL")) ? "&force=true" : "";
       const res = await fetch(
         `/api/tasks?action=getTasks&sheet=${encodeURIComponent(sheetsParam)}&assignee=${encodeURIComponent(
           queryAssignee
@@ -364,19 +361,15 @@ export default function HomePage() {
     if (target.length > 0) {
       setSelectedSheets(target);
       localStorage.setItem("gds_selectedSheets", JSON.stringify(target));
-      fetchTasks(assignee, target, true);
+      fetchTasks(assignee, target, preset !== "all");
     }
   };
 
   useEffect(() => {
-    const savedLinks = localStorage.getItem("gds_folder_links");
-    if (savedLinks) {
-      try {
-        setFolderLinksMap(JSON.parse(savedLinks));
-      } catch (e) {
-        console.log("Could not parse saved folder links", e);
-      }
-    }
+    // ล้างแคชลิงก์เก่าใน LocalStorage ทิ้งทั้งหมด เพื่อให้อ้างอิงลิงก์สดจาก Google Sheets เสมอ 100%
+    try {
+      localStorage.removeItem("gds_folder_links");
+    } catch (e) {}
 
     const savedName = localStorage.getItem("gds_assignee");
     const initialName = savedName || "ลูกหยี";
@@ -470,13 +463,7 @@ export default function HomePage() {
             };
           });
 
-          setFolderLinksMap((prev) => {
-            const merged = { ...prev, ...newLinks };
-            try {
-              localStorage.setItem("gds_folder_links", JSON.stringify(merged));
-            } catch (e) {}
-            return merged;
-          });
+          setFolderLinksMap((prev) => ({ ...prev, ...newLinks }));
         }
 
         // ล้าง Client Cache เพื่อให้ดึงข้อมูลโฟลเดอร์ล่าสุดที่เพิ่งสร้างมาแสดงผล
@@ -538,7 +525,7 @@ export default function HomePage() {
                 </h1>
                 <span className="text-[11px] font-semibold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-200">
                   {availableSheets.length > 0
-                    ? `${availableSheets.length} วันที่ / ${staffList.length} พนักงาน`
+                    ? `ทั้งหมด ${availableSheets.length} วัน / พนักงาน ${staffList.length} คน`
                     : "กำลังดึงข้อมูลชีต..."}
                 </span>
               </div>
@@ -1206,22 +1193,16 @@ export default function HomePage() {
                             <td className="py-3 px-3 text-center" onClick={(e) => e.stopPropagation()}>
                               {(() => {
                                 const linkInfo = folderLinksMap[key];
-                                const taskNameForLink = (taskNamesMap[key] || task.taskName || "").trim();
-                                // ถ้ามี uploadUrl จากชีต/แคชให้ใช้ก่อน ถ้าไม่มีแต่ task เสร็จสิ้นและมีชื่อ ให้สร้างลิงก์ค้นหา Google Drive ตรงๆ เพื่อไม่ให้ขึ้นว่า 'รอสร้างโฟลเดอร์'
-                                const thUrl =
-                                  linkInfo?.thUrl ||
-                                  task.uploadUrl ||
-                                  (task.isCompleted && taskNameForLink
-                                    ? `https://drive.google.com/drive/search?q=type:folder%20${encodeURIComponent(taskNameForLink)}`
-                                    : "");
-                                const interUrl = linkInfo?.interUrl || task.interFolderUrl;
+                                // อ้างอิงลิงก์จริงจาก Google Sheets เป็นหลัก 100% ไม่สร้างลิงก์หลอก และไม่ดึงลิงก์โฟลเดอร์ที่ถูกลบไปแล้วกลับมา
+                                const thUrl = (linkInfo?.thUrl || task.uploadUrl || "").trim();
+                                const interUrl = (linkInfo?.interUrl || task.interFolderUrl || "").trim();
 
                                 if (!thUrl && !interUrl) {
                                   if (task.isCompleted) {
                                     return (
                                       <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50/80 px-2.5 py-1 rounded-lg border border-emerald-200">
                                         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                                        <span>เสร็จสิ้นแล้ว</span>
+                                        <span>เสร็จสิ้น (ยังไม่มีลิงก์)</span>
                                       </span>
                                     );
                                   }
