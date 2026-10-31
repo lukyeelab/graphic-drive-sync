@@ -812,7 +812,7 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
     }
   } else {
     const sortedSheets = sortSheetNamesDesc(allSheetNames);
-    const limitSheets = (assignee && assignee !== "ALL") ? 7 : 4;
+    const limitSheets = (assignee && assignee !== "ALL") ? 20 : 8;
     targetSheetNames = sortedSheets.slice(0, limitSheets);
   }
 
@@ -823,7 +823,7 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
 
   for (let i = 0; i < targetSheetNames.length; i++) {
     const sName = targetSheetNames[i];
-    const key = "FAST_TASKS_V2_" + Utilities.base64EncodeWebSafe(sName).slice(0, 50);
+    const key = "FAST_TASKS_V3_" + Utilities.base64EncodeWebSafe(sName).slice(0, 50);
     cacheKeyMap[sName] = key;
     cacheKeysToRequest.push(key);
   }
@@ -915,7 +915,7 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
         }
 
         sheetsTasksMap[sheetName] = parsedSheetTasks;
-        const cKey = cacheKeyMap[sheetName] || ("FAST_TASKS_V2_" + Utilities.base64EncodeWebSafe(sheetName).slice(0, 50));
+        const cKey = cacheKeyMap[sheetName] || ("FAST_TASKS_V3_" + Utilities.base64EncodeWebSafe(sheetName).slice(0, 50));
         cacheToPut[cKey] = JSON.stringify(parsedSheetTasks);
       }
 
@@ -939,8 +939,7 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
         const values = range.getValues();
         const formulas = range.getFormulas();
         const notes = range.getNotes();
-        const colDBriefRich = sheet.getRange(1, CONFIG.COL_BRIEF_LINK, lastRow, 1).getRichTextValues();
-        const colFUploadRich = sheet.getRange(1, CONFIG.COL_UPLOAD_LINK, lastRow, 1).getRichTextValues();
+        const richTexts = range.getRichTextValues();
         const parsedSheetTasks = [];
 
         let currentCategory = "";
@@ -957,7 +956,7 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
           }
 
           const briefVal = values[rowIdx][CONFIG.COL_BRIEF_LINK - 1];
-          const briefRich = colDBriefRich[rowIdx][0];
+          const briefRich = richTexts[rowIdx][CONFIG.COL_BRIEF_LINK - 1];
           const briefFormula = formulas[rowIdx][CONFIG.COL_BRIEF_LINK - 1];
           const extractedBrief = extractCellLinkAndTitle(briefVal, briefRich, briefFormula);
 
@@ -971,7 +970,7 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
 
           if (!rowAssignee && !noVal && !uploadCellText) continue;
 
-          const uploadRich = colFUploadRich[rowIdx][0];
+          const uploadRich = richTexts[rowIdx][CONFIG.COL_UPLOAD_LINK - 1];
           const uploadFormula = formulas[rowIdx][CONFIG.COL_UPLOAD_LINK - 1];
           const extractedUpload = extractCellLinkAndTitle(uploadCellText, uploadRich, uploadFormula);
           const uploadUrl = extractedUpload.link;
@@ -1008,7 +1007,7 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
         }
 
         sheetsTasksMap[sName] = parsedSheetTasks;
-        const cKey = cacheKeyMap[sName] || ("FAST_TASKS_V2_" + Utilities.base64EncodeWebSafe(sName).slice(0, 50));
+        const cKey = cacheKeyMap[sName] || ("FAST_TASKS_V3_" + Utilities.base64EncodeWebSafe(sName).slice(0, 50));
         cacheToPut[cKey] = JSON.stringify(parsedSheetTasks);
       }
 
@@ -1261,7 +1260,7 @@ function createFoldersAndSyncBatch(payload) {
 
     // 8. ล้าง Cache ของแผ่นงานนี้เพื่อให้ข้อมูลใหม่พร้อมใช้งาน
     try {
-      const cKey = "FAST_TASKS_V2_" + Utilities.base64EncodeWebSafe(sName).slice(0, 50);
+      const cKey = "FAST_TASKS_V3_" + Utilities.base64EncodeWebSafe(sName).slice(0, 50);
       scriptCache.remove(cKey);
     } catch (e) {}
   }

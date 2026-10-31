@@ -110,7 +110,7 @@ export default function HomePage() {
   const applyTasksToState = (allTasks: Task[], targetAssignee: string) => {
     const searchLower = (targetAssignee || "").toLowerCase().trim();
     const loadedTasks = searchLower && searchLower !== "all"
-      ? allTasks.filter((t) => t.assignee.toLowerCase().includes(searchLower))
+      ? allTasks.filter((t) => (t.assignee || "").toLowerCase().includes(searchLower))
       : allTasks;
 
     setTasks(loadedTasks);
@@ -121,8 +121,9 @@ export default function HomePage() {
 
     loadedTasks.forEach((t) => {
       const key = getTaskKey(t.sheetName, t.row);
-      const isAutoPattern = t.taskName.endsWith(`_${t.sheetName}`) || !t.uploadUrl;
-      nameMap[key] = isAutoPattern && !t.uploadUrl ? "" : (t.taskName || "");
+      const taskNameStr = (t.taskName || "").trim();
+      const isAutoPattern = taskNameStr.endsWith(`_${t.sheetName}`) || !t.uploadUrl;
+      nameMap[key] = isAutoPattern && !t.uploadUrl ? "" : taskNameStr;
       if (!t.isCompleted) {
         pendingKeys.push(key);
       }
@@ -208,9 +209,9 @@ export default function HomePage() {
   const fetchTasks = async (targetAssignee = assignee, targetSheet = sheetName, forceLoading = false) => {
     if (!targetSheet) return;
 
-    // 1. ตรวจสอบว่ามีข้อมูลใน Client Cache แล้วหรือไม่ ถ้ามีให้แสดงผลทันทีใน 0 มิลลิวินาที
+    // 1. ตรวจสอบว่ามีข้อมูลใน Client Cache แล้วหรือไม่ ถ้ามีและมีรายการงานให้แสดงผลทันทีใน 0 มิลลิวินาที
     const cachedSheetTasks = clientSheetCacheRef.current[targetSheet];
-    if (cachedSheetTasks && !forceLoading) {
+    if (cachedSheetTasks && cachedSheetTasks.length > 0 && !forceLoading) {
       applyTasksToState(cachedSheetTasks, targetAssignee);
       setIsLoading(false);
       setErrorMessage(null);
@@ -409,9 +410,9 @@ export default function HomePage() {
     }
     const matchSearch =
       searchTerm === "" ||
-      t.taskName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      t.category.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      t.sheetName.toLowerCase().includes(searchTerm.toLowerCase());
+      (t.taskName || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (t.category || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (t.sheetName || "").toLowerCase().includes(searchTerm.toLowerCase());
     return matchSearch;
   });
 
@@ -565,7 +566,10 @@ export default function HomePage() {
 
             <div className="flex gap-2">
               <button
-                onClick={() => fetchTasks(assignee, sheetName)}
+                onClick={() => {
+                  delete clientSheetCacheRef.current[sheetName];
+                  fetchTasks(assignee, sheetName, true);
+                }}
                 disabled={isLoading || isMetadataLoading || !sheetName}
                 className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] rounded-xl shadow-xs transition-all disabled:opacity-60 cursor-pointer"
               >
