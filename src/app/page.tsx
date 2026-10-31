@@ -99,12 +99,73 @@ export default function HomePage() {
   } | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
+  const clientSheetCacheRef = useRef<Record<string, Task[]>>({});
   const getTaskKey = (sheet: string, row: number) => `${sheet}_${row}`;
 
   const copyToClipboard = (url: string, label: string) => {
     navigator.clipboard.writeText(url);
     setCopiedLink(label);
     setTimeout(() => setCopiedLink(null), 2000);
+  };
+
+  // กรองและอัปเดตงานลง State ทันทีใน Memory (0 ms)
+  const applyTasksToState = (allTasks: Task[], targetAssignee: string) => {
+    const searchLower = (targetAssignee || "").toLowerCase().trim();
+    const loadedTasks = searchLower && searchLower !== "all"
+      ? allTasks.filter((t) => t.assignee.toLowerCase().includes(searchLower))
+      : allTasks;
+
+    setTasks(loadedTasks);
+
+    const nameMap: Record<string, string> = {};
+    const pendingKeys: string[] = [];
+    const incomingLinks: Record<string, { thUrl?: string; interUrl?: string }> = {};
+
+    loadedTasks.forEach((t) => {
+      const key = getTaskKey(t.sheetName, t.row);
+      const isAutoPattern = t.taskName.endsWith(`_${t.sheetName}`) || !t.uploadUrl;
+      nameMap[key] = isAutoPattern && !t.uploadUrl ? "" : (t.taskName || "");
+      if (!t.isCompleted) {
+        pendingKeys.push(key);
+      }
+      if (t.uploadUrl || t.interFolderUrl) {
+        incomingLinks[key] = {
+          thUrl: t.uploadUrl || "",
+          interUrl: t.interFolderUrl || "",
+        };
+      }
+    });
+
+    setTaskNamesMap((prev) => ({ ...nameMap, ...prev }));
+    setSelectedTaskKeys(pendingKeys);
+
+    setFolderLinksMap((prev) => {
+      const merged = { ...prev };
+      for (const k in incomingLinks) {
+        merged[k] = {
+          thUrl: incomingLinks[k].thUrl || merged[k]?.thUrl || "",
+          interUrl: incomingLinks[k].interUrl || merged[k]?.interUrl || "",
+        };
+      }
+      try {
+        localStorage.setItem("gds_folder_links", JSON.stringify(merged));
+      } catch (e) {}
+      return merged;
+    });
+  };
+
+  // ดึงงานของแผ่นงานมารอไว้ล่วงหน้าเงียบๆ (Prefetch)
+  const prefetchSheetTasks = async (targetSheet: string) => {
+    if (!targetSheet || targetSheet === "ALL" || clientSheetCacheRef.current[targetSheet]) return;
+    try {
+      const res = await fetch(
+        `/api/tasks?action=getTasks&sheet=${encodeURIComponent(targetSheet)}&assignee=ALL&pendingOnly=false`
+      );
+      const data = await res.json();
+      if (data.success && data.tasks) {
+        clientSheetCacheRef.current[targetSheet] = data.tasks;
+      }
+    } catch (e) {}
   };
 
   // โหลดรายชื่อพนักงานและแท็บวันที่ทั้งหมด
@@ -115,6 +176,8 @@ export default function HomePage() {
       if (data.success) {
         if (data.sheetNames && data.sheetNames.length > 0) {
           setAvailableSheets(data.sheetNames);
+          // ดึงงานของแผ่นงานล่าสุดมารอไว้เบื้องหลังทันที
+          prefetchSheetTasks(data.sheetNames[0]);
         }
         if (data.staffList && data.staffList.length > 0) {
           setStaffList(data.staffList);
@@ -125,15 +188,24 @@ export default function HomePage() {
     }
   };
 
-  // โหลดรายการงานตามชื่อพนักงาน
-  const fetchTasks = async (targetAssignee = assignee, targetSheet = sheetName) => {
+  // โหลดรายการงานตามชื่อพนักงาน (Instant Cache + SWR)
+  const fetchTasks = async (targetAssignee = assignee, targetSheet = sheetName, forceLoading = false) => {
+    // 1. ตรวจสอบว่ามีข้อมูลใน Client Cache แล้วหรือไม่ ถ้ามีให้แสดงผลทันทีใน 0 มิลลิวินาที
+    const cachedSheetTasks = clientSheetCacheRef.current[targetSheet];
+    if (cachedSheetTasks && !forceLoading) {
+      applyTasksToState(cachedSheetTasks, targetAssignee);
+      setIsLoading(false);
+      setErrorMessage(null);
+    } else {
+      setIsLoading(true);
+    }
+
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
-    setIsLoading(true);
     setErrorMessage(null);
     setSyncResult(null);
 
@@ -146,11 +218,11 @@ export default function HomePage() {
     }, 120000);
 
     try {
-      // ดึงงานทั้งหมดของพนักงานคนนี้ (pendingOnly=false) เพื่อให้ได้ข้อมูลครบทั้งงานเสร็จและไม่เสร็จ
-      // ทำให้สลับติ๊ก 'แสดงเฉพาะงานที่ยังไม่เสร็จ' ได้ทันทีใน 0 ms และนับสถิติได้ถูกต้อง 100%
+      // ดึงงานของแผ่นงานนั้นแบบ ALL เพื่อแคชไว้รองรับการสลับชื่อพนักงานได้ทันทีใน 0ms
+      const queryAssignee = targetSheet === "ALL" ? targetAssignee : "ALL";
       const res = await fetch(
         `/api/tasks?action=getTasks&sheet=${encodeURIComponent(targetSheet)}&assignee=${encodeURIComponent(
-          targetAssignee
+          queryAssignee
         )}&pendingOnly=false`,
         { signal: controller.signal }
       );
@@ -161,58 +233,23 @@ export default function HomePage() {
 
       const data = await res.json();
       if (data.success) {
-        const searchLower = (targetAssignee || "").toLowerCase().trim();
         const rawTasks: Task[] = data.tasks || [];
-        const loadedTasks = searchLower && searchLower !== "all"
-          ? rawTasks.filter((t) => t.assignee.toLowerCase().includes(searchLower))
-          : rawTasks;
-
-        setTasks(loadedTasks);
-
-        // จัดการชื่องาน: ถ้าในชีตยังว่างอยู่ ให้เว้นว่างไว้ให้ผู้ใช้พิมพ์เอง
-        const nameMap: Record<string, string> = {};
-        const pendingKeys: string[] = [];
-        const incomingLinks: Record<string, { thUrl?: string; interUrl?: string }> = {};
-
-        loadedTasks.forEach((t) => {
-          const key = getTaskKey(t.sheetName, t.row);
-          // ถ้าชื่องานเป็นชื่อที่ระบบตั้งอัตโนมัติ ให้เคลียร์เป็นค่าว่าง เพื่อให้ผู้ใช้พิมพ์เอง
-          const isAutoPattern = t.taskName.endsWith(`_${t.sheetName}`) || !t.uploadUrl;
-          nameMap[key] = isAutoPattern && !t.uploadUrl ? "" : (t.taskName || "");
-          if (!t.isCompleted) {
-            pendingKeys.push(key);
-          }
-          if (t.uploadUrl || t.interFolderUrl) {
-            incomingLinks[key] = {
-              thUrl: t.uploadUrl || "",
-              interUrl: t.interFolderUrl || "",
-            };
-          }
-        });
-        setTaskNamesMap(nameMap);
-        setSelectedTaskKeys(pendingKeys);
-
-        setFolderLinksMap((prev) => {
-          const merged = { ...prev };
-          for (const k in incomingLinks) {
-            merged[k] = {
-              thUrl: incomingLinks[k].thUrl || merged[k]?.thUrl || "",
-              interUrl: incomingLinks[k].interUrl || merged[k]?.interUrl || "",
-            };
-          }
-          try {
-            localStorage.setItem("gds_folder_links", JSON.stringify(merged));
-          } catch (e) {}
-          return merged;
-        });
+        if (targetSheet !== "ALL") {
+          clientSheetCacheRef.current[targetSheet] = rawTasks;
+        }
+        applyTasksToState(rawTasks, targetAssignee);
       } else {
-        setErrorMessage(data.error || "เกิดข้อผิดพลาดในการดึงข้อมูลจาก Google Sheets");
-        setTasks([]);
+        if (!cachedSheetTasks) {
+          setErrorMessage(data.error || "เกิดข้อผิดพลาดในการดึงข้อมูลจาก Google Sheets");
+          setTasks([]);
+        }
       }
     } catch (err: any) {
       if (err.name !== "AbortError") {
         console.error(err);
-        setErrorMessage("ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ Next.js ได้");
+        if (!cachedSheetTasks) {
+          setErrorMessage("ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ Next.js ได้");
+        }
       }
     } finally {
       clearTimeout(timeoutId);
@@ -332,7 +369,9 @@ export default function HomePage() {
           });
         }
 
-        fetchTasks(assignee, sheetName);
+        // ล้าง Client Cache เพื่อให้ดึงข้อมูลโฟลเดอร์ล่าสุดที่เพิ่งสร้างมาแสดงผล
+        clientSheetCacheRef.current = {};
+        fetchTasks(assignee, sheetName, true);
       } else {
         alert(result.error || result.message || "เกิดข้อผิดพลาดในการสร้างโฟลเดอร์");
       }

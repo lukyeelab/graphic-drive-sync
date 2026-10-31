@@ -658,16 +658,34 @@ function getInitialMetadata() {
 }
 
 /**
+ * ฟังก์ชันช่วยดึงเฉพาะรายชื่อแผ่นงานแบบเร็วพิเศษ (ดึงจาก Cache ก่อนเสมอ ไม่ต้องรัน ss.getSheets() ซ้ำ)
+ */
+function getSheetNamesFast(ss) {
+  const cache = CacheService.getScriptCache();
+  const cachedMeta = cache.get("INITIAL_METADATA_V4");
+  if (cachedMeta) {
+    try {
+      const parsed = JSON.parse(cachedMeta);
+      if (parsed && Array.isArray(parsed.sheetNames) && parsed.sheetNames.length > 0) {
+        return parsed.sheetNames;
+      }
+    } catch (e) {}
+  }
+  const allSheets = (ss || SpreadsheetApp.getActiveSpreadsheet()).getSheets();
+  return allSheets.map(s => s.getName()).filter(n => n.trim() !== "TEM");
+}
+
+/**
  * ฟังก์ชันช่วยดึงข้อมูลชีตแบบ Ultra-Fast ผ่าน Google Sheets API v4 ในครั้งเดียว
  * ได้ทั้งค่าข้อความ, Hyperlink, Smart Chip URI และ Note โดยไม่ต้องเรียก getRichTextValues() ที่ช้า
  */
 function fetchSheetsGridDataFast(spreadsheetId, sheetNames) {
   try {
     const token = ScriptApp.getOAuthToken();
-    // ถ้าดึงแผ่นงานเดียวใช้ 350 แถว ถ้าดึงหลายแผ่นงานพร้อมกัน (ALL) ใช้ 180 แถวเพื่อความเร็วสูงสุด
-    const maxRow = sheetNames.length === 1 ? 350 : 180;
+    // ลดจำนวนแถวและดึง A1:L ให้พอดีกับงานจริง เพื่อให้ Payload เล็กและโหลดกลับมาในเสี้ยววินาที
+    const maxRow = sheetNames.length === 1 ? 250 : 140;
     const rangesParam = sheetNames
-      .map(name => `ranges=${encodeURIComponent(`'${name}'!A1:N${maxRow}`)}`)
+      .map(name => `ranges=${encodeURIComponent(`'${name}'!A1:L${maxRow}`)}`)
       .join("&");
     const fields = "sheets(properties(title),data(rowData(values(formattedValue,hyperlink,note,textFormatRuns(format(link(uri))),chipRuns(chip(richLinkProperties(uri)))))))";
     const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?${rangesParam}&fields=${encodeURI(fields)}`;
@@ -759,14 +777,14 @@ function extractApiCellInfo(cellObj) {
 }
 
 /**
- * ดึงรายการงานตามชื่อพนักงาน (Ultra-Fast Version: ใช้ Sheets API Batch + CacheService + Time-Guard)
+ * ดึงรายการงานตามชื่อพนักงาน (Instant Version: แคชข้อมูลระดับแผ่นงาน + กรองใน Memory ทันที)
  */
 function getStaffTasks(assignee, targetSheet, pendingOnly) {
   const startTime = Date.now();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const ssId = ss.getId();
-  const allSheets = ss.getSheets();
-  const allSheetNames = allSheets.map(s => s.getName()).filter(n => n.trim() !== "TEM");
+  const scriptCache = CacheService.getScriptCache();
+  const allSheetNames = getSheetNamesFast(ss);
 
   let targetSheetNames = [];
   if (targetSheet && targetSheet !== "ALL") {
@@ -776,213 +794,240 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
       return { success: false, error: `ไม่พบแผ่นงานชื่อ: ${targetSheet}` };
     }
   } else {
-    // กรณี ALL เรียงลำดับแท็บวันที่ล่าสุดก่อนเสมอ
     const sortedSheets = sortSheetNamesDesc(allSheetNames);
-    // ถ้าระบุชื่อพนักงานค้นหา 10 แผ่นงานล่าสุด ถ้าดูของทุกคน (ALL) ค้นหา 5 แผ่นงานล่าสุดเพื่อความไว
-    const limitSheets = (assignee && assignee !== "ALL") ? 10 : 5;
+    const limitSheets = (assignee && assignee !== "ALL") ? 8 : 5;
     targetSheetNames = sortedSheets.slice(0, limitSheets);
   }
 
-  const tasks = [];
-  const searchName = (assignee || "").toLowerCase().trim();
-  const scriptCache = CacheService.getScriptCache();
   const memoryBriefCache = {};
+  const sheetsTasksMap = {};
+  const sheetsToFetchFromApi = [];
 
-  // ดึงข้อมูลทุกแผ่นงานที่ต้องการใน HTTP Request เดียว (เร็วกว่า getRichTextValues 10-20 เท่า)
-  const apiData = fetchSheetsGridDataFast(ssId, targetSheetNames);
+  // 1. ตรวจสอบว่าแผ่นงานไหนมีข้อมูลอยู่ใน Instant Cache แล้วบ้าง (ช่วยให้กดค้นหาซ้ำหรือสลับชื่อเห็นงานทันทีใน 0.05 วินาที)
+  for (let i = 0; i < targetSheetNames.length; i++) {
+    const sName = targetSheetNames[i];
+    const sheetCacheKey = "SHEET_TASKS_V1_" + Utilities.base64EncodeWebSafe(sName).slice(0, 50);
+    const cachedSheetTasks = scriptCache.get(sheetCacheKey);
+    if (cachedSheetTasks) {
+      try {
+        sheetsTasksMap[sName] = JSON.parse(cachedSheetTasks);
+        continue;
+      } catch (e) {}
+    }
+    sheetsToFetchFromApi.push(sName);
+  }
 
-  if (apiData && apiData.sheets && apiData.sheets.length > 0) {
-    for (let sIdx = 0; sIdx < apiData.sheets.length; sIdx++) {
-      const sheetObj = apiData.sheets[sIdx];
-      const sheetName = sheetObj.properties?.title || targetSheetNames[sIdx];
-      const rowData = sheetObj.data?.[0]?.rowData || [];
+  // 2. ดึงผ่าน API เฉพาะแผ่นงานที่ยังไม่อยู่ใน Cache
+  if (sheetsToFetchFromApi.length > 0) {
+    const apiData = fetchSheetsGridDataFast(ssId, sheetsToFetchFromApi);
 
-      let currentCategory = "";
-      let currentBriefLink = "";
-      let currentBriefTitle = "";
+    if (apiData && apiData.sheets && apiData.sheets.length > 0) {
+      for (let sIdx = 0; sIdx < apiData.sheets.length; sIdx++) {
+        const sheetObj = apiData.sheets[sIdx];
+        const sheetName = sheetObj.properties?.title || sheetsToFetchFromApi[sIdx];
+        const rowData = sheetObj.data?.[0]?.rowData || [];
+        const parsedSheetTasks = [];
 
-      for (let r = CONFIG.DATA_START_ROW; r <= rowData.length; r++) {
-        const rowIdx = r - 1;
-        const vals = rowData[rowIdx]?.values;
-        if (!vals || vals.length === 0) continue;
+        let currentCategory = "";
+        let currentBriefLink = "";
+        let currentBriefTitle = "";
 
-        // 1. จัดการหมวดหมู่ (Col C: Merged Cell)
-        const categoryCell = vals[CONFIG.COL_CATEGORY_NAME - 1]?.formattedValue;
-        if (categoryCell && categoryCell.toString().trim() !== "") {
-          currentCategory = categoryCell.toString().trim();
-          currentBriefLink = "";
-          currentBriefTitle = "";
-        }
+        for (let r = CONFIG.DATA_START_ROW; r <= rowData.length; r++) {
+          const rowIdx = r - 1;
+          const vals = rowData[rowIdx]?.values;
+          if (!vals || vals.length === 0) continue;
 
-        // 2. จัดการใบบรีฟ (Col D: Merged Cell - ได้ลิงก์ Smart Chip ทันทีจาก API)
-        const briefInfo = extractApiCellInfo(vals[CONFIG.COL_BRIEF_LINK - 1]);
-        if (briefInfo.link) {
-          currentBriefLink = briefInfo.link;
-        }
-        if (briefInfo.title) {
-          currentBriefTitle = briefInfo.title;
-        }
-
-        // 3. กรองตามชื่อพนักงานทันที
-        const rowAssignee = (vals[CONFIG.COL_ASSIGNEE - 1]?.formattedValue || "").toString().trim();
-        const noVal = vals[CONFIG.COL_NO - 1]?.formattedValue || "";
-        const uploadInfo = extractApiCellInfo(vals[CONFIG.COL_UPLOAD_LINK - 1]);
-        const uploadCellText = uploadInfo.title;
-        const status = (vals[CONFIG.COL_STATUS - 1]?.formattedValue || "").toString().trim();
-
-        if (searchName && searchName !== "all") {
-          if (!rowAssignee) continue;
-          const rowNameLower = rowAssignee.toLowerCase();
-          if (rowNameLower !== searchName && !rowNameLower.includes(searchName)) {
-            continue;
+          // จัดการหมวดหมู่ (Col C)
+          const categoryCell = vals[CONFIG.COL_CATEGORY_NAME - 1]?.formattedValue;
+          if (categoryCell && categoryCell.toString().trim() !== "") {
+            currentCategory = categoryCell.toString().trim();
+            currentBriefLink = "";
+            currentBriefTitle = "";
           }
-        } else {
-          if (!rowAssignee && !noVal && !uploadCellText) {
-            continue;
+
+          // จัดการใบบรีฟ (Col D)
+          const briefInfo = extractApiCellInfo(vals[CONFIG.COL_BRIEF_LINK - 1]);
+          if (briefInfo.link) currentBriefLink = briefInfo.link;
+          if (briefInfo.title) currentBriefTitle = briefInfo.title;
+
+          const rowAssignee = (vals[CONFIG.COL_ASSIGNEE - 1]?.formattedValue || "").toString().trim();
+          const noVal = vals[CONFIG.COL_NO - 1]?.formattedValue || "";
+          const uploadInfo = extractApiCellInfo(vals[CONFIG.COL_UPLOAD_LINK - 1]);
+          const uploadCellText = uploadInfo.title;
+          const status = (vals[CONFIG.COL_STATUS - 1]?.formattedValue || "").toString().trim();
+
+          if (!rowAssignee && !noVal && !uploadCellText) continue;
+
+          const uploadUrl = uploadInfo.link;
+          const cellNote = uploadInfo.note;
+          let interFolderUrl = "";
+          const noteMatch = cellNote.match(/INTER:\s*(https:\/\/[^\s]+)/i);
+          if (noteMatch && noteMatch[1]) {
+            interFolderUrl = noteMatch[1].trim();
           }
+
+          const isCompleted = status.includes("เสร็จสิ้น") || (uploadUrl !== "" && uploadCellText !== "");
+
+          // แปลงลิงก์ใบบรีฟให้เป็น Google Slides Presentation (จำกัดเวลาค้นหา Drive สดไม่เกิน 1.2 วินาที เพื่อความเร็วสูงสุด)
+          const allowDriveSearch = (Date.now() - startTime) < 1200;
+          const taskBriefLink = normalizeToPresentationUrl(
+            currentBriefLink,
+            currentBriefTitle,
+            scriptCache,
+            memoryBriefCache,
+            allowDriveSearch
+          );
+
+          const team = (vals[CONFIG.COL_TEAM - 1]?.formattedValue || "").toString().trim();
+          const assignDate = vals[CONFIG.COL_ASSIGN_DATE - 1]?.formattedValue || "";
+
+          parsedSheetTasks.push({
+            sheetName: sheetName,
+            row: r,
+            category: currentCategory || "ทั่วไป",
+            briefLink: taskBriefLink,
+            briefTitle: currentBriefTitle,
+            no: noVal || 1,
+            taskName: uploadCellText,
+            uploadUrl: uploadUrl,
+            interFolderUrl: interFolderUrl,
+            hasUploadLink: !!uploadUrl,
+            team: team,
+            assignee: rowAssignee,
+            assignDate: assignDate,
+            status: status || "กำลังทำ",
+            isCompleted: isCompleted,
+          });
         }
 
-        const uploadUrl = uploadInfo.link;
-        const cellNote = uploadInfo.note;
-        let interFolderUrl = "";
-        const noteMatch = cellNote.match(/INTER:\s*(https:\/\/[^\s]+)/i);
-        if (noteMatch && noteMatch[1]) {
-          interFolderUrl = noteMatch[1].trim();
+        sheetsTasksMap[sheetName] = parsedSheetTasks;
+        // แคชข้อมูลของแผ่นงานนี้ไว้ 45 วินาที (ค้นหาครั้งต่อไปจะแสดงผลทันทีแบบไม่ต้องรอโหลดชีตใหม่)
+        try {
+          const sheetCacheKey = "SHEET_TASKS_V1_" + Utilities.base64EncodeWebSafe(sheetName).slice(0, 50);
+          scriptCache.put(sheetCacheKey, JSON.stringify(parsedSheetTasks), 45);
+        } catch (e) {}
+      }
+    } else {
+      // Fallback: ดึงผ่าน SpreadsheetApp เฉพาะแผ่นงานที่ API มีปัญหา
+      Logger.log("Falling back to standard SpreadsheetApp reading for: " + sheetsToFetchFromApi.join(", "));
+      for (let sIdx = 0; sIdx < sheetsToFetchFromApi.length; sIdx++) {
+        const sName = sheetsToFetchFromApi[sIdx];
+        const sheet = ss.getSheetByName(sName);
+        if (!sheet) continue;
+        const maxFallbackRow = sheetsToFetchFromApi.length === 1 ? 250 : 140;
+        const lastRow = Math.min(sheet.getLastRow(), maxFallbackRow);
+        if (lastRow < CONFIG.DATA_START_ROW) continue;
+
+        const range = sheet.getRange(1, 1, lastRow, 12);
+        const values = range.getValues();
+        const formulas = range.getFormulas();
+        const notes = range.getNotes();
+        const colDBriefRich = sheet.getRange(1, CONFIG.COL_BRIEF_LINK, lastRow, 1).getRichTextValues();
+        const colFUploadRich = sheet.getRange(1, CONFIG.COL_UPLOAD_LINK, lastRow, 1).getRichTextValues();
+        const parsedSheetTasks = [];
+
+        let currentCategory = "";
+        let currentBriefLink = "";
+        let currentBriefTitle = "";
+
+        for (let r = CONFIG.DATA_START_ROW; r <= lastRow; r++) {
+          const rowIdx = r - 1;
+          const categoryCell = values[rowIdx][CONFIG.COL_CATEGORY_NAME - 1];
+          if (categoryCell && categoryCell.toString().trim() !== "") {
+            currentCategory = categoryCell.toString().trim();
+            currentBriefLink = "";
+            currentBriefTitle = "";
+          }
+
+          const briefVal = values[rowIdx][CONFIG.COL_BRIEF_LINK - 1];
+          const briefRich = colDBriefRich[rowIdx][0];
+          const briefFormula = formulas[rowIdx][CONFIG.COL_BRIEF_LINK - 1];
+          const extractedBrief = extractCellLinkAndTitle(briefVal, briefRich, briefFormula);
+
+          if (extractedBrief.link) currentBriefLink = extractedBrief.link;
+          if (extractedBrief.title) currentBriefTitle = extractedBrief.title;
+
+          const rowAssignee = values[rowIdx][CONFIG.COL_ASSIGNEE - 1]?.toString().trim() || "";
+          const noVal = values[rowIdx][CONFIG.COL_NO - 1];
+          const uploadCellText = values[rowIdx][CONFIG.COL_UPLOAD_LINK - 1]?.toString().trim() || "";
+          const status = values[rowIdx][CONFIG.COL_STATUS - 1]?.toString().trim() || "";
+
+          if (!rowAssignee && !noVal && !uploadCellText) continue;
+
+          const uploadRich = colFUploadRich[rowIdx][0];
+          const uploadFormula = formulas[rowIdx][CONFIG.COL_UPLOAD_LINK - 1];
+          const extractedUpload = extractCellLinkAndTitle(uploadCellText, uploadRich, uploadFormula);
+          const uploadUrl = extractedUpload.link;
+
+          const cellNote = (notes[rowIdx] && notes[rowIdx][CONFIG.COL_UPLOAD_LINK - 1]) || "";
+          let interFolderUrl = "";
+          const noteMatch = cellNote.match(/INTER:\s*(https:\/\/[^\s]+)/i);
+          if (noteMatch && noteMatch[1]) {
+            interFolderUrl = noteMatch[1].trim();
+          }
+
+          const isCompleted = status.includes("เสร็จสิ้น") || (uploadUrl !== "" && uploadCellText !== "");
+
+          const allowDriveSearch = (Date.now() - startTime) < 1200;
+          const taskBriefLink = normalizeToPresentationUrl(
+            currentBriefLink,
+            currentBriefTitle,
+            scriptCache,
+            memoryBriefCache,
+            allowDriveSearch
+          );
+
+          const team = values[rowIdx][CONFIG.COL_TEAM - 1]?.toString().trim() || "";
+          const assignDate = values[rowIdx][CONFIG.COL_ASSIGN_DATE - 1];
+
+          parsedSheetTasks.push({
+            sheetName: sName,
+            row: r,
+            category: currentCategory || "ทั่วไป",
+            briefLink: taskBriefLink,
+            briefTitle: currentBriefTitle,
+            no: noVal || 1,
+            taskName: uploadCellText,
+            uploadUrl: uploadUrl,
+            interFolderUrl: interFolderUrl,
+            hasUploadLink: !!uploadUrl,
+            team: team,
+            assignee: rowAssignee,
+            assignDate: assignDate instanceof Date ? Utilities.formatDate(assignDate, "GMT+7", "dd/MM/yyyy") : assignDate,
+            status: status || "กำลังทำ",
+            isCompleted: isCompleted,
+          });
         }
 
-        const isCompleted = status.includes("เสร็จสิ้น") || (uploadUrl !== "" && uploadCellText !== "");
-
-        if (pendingOnly && isCompleted) {
-          continue;
-        }
-
-        // 4. แปลงลิงก์ใบบรีฟ Col D (มี Time-Guard: ถ้ารันเกิน 3.5 วินาทีแล้ว จะข้ามการค้นหา Drive สดเพื่อส่งข้อมูลกลับทันที)
-        const allowDriveSearch = (Date.now() - startTime) < 3500;
-        const taskBriefLink = normalizeToPresentationUrl(
-          currentBriefLink,
-          currentBriefTitle,
-          scriptCache,
-          memoryBriefCache,
-          allowDriveSearch
-        );
-
-        const team = (vals[CONFIG.COL_TEAM - 1]?.formattedValue || "").toString().trim();
-        const assignDate = vals[CONFIG.COL_ASSIGN_DATE - 1]?.formattedValue || "";
-
-        tasks.push({
-          sheetName: sheetName,
-          row: r,
-          category: currentCategory || "ทั่วไป",
-          briefLink: taskBriefLink,
-          briefTitle: currentBriefTitle,
-          no: noVal || 1,
-          taskName: uploadCellText,
-          uploadUrl: uploadUrl,
-          interFolderUrl: interFolderUrl,
-          hasUploadLink: !!uploadUrl,
-          team: team,
-          assignee: rowAssignee,
-          assignDate: assignDate,
-          status: status || "กำลังทำ",
-          isCompleted: isCompleted,
-        });
+        sheetsTasksMap[sName] = parsedSheetTasks;
+        try {
+          const sheetCacheKey = "SHEET_TASKS_V1_" + Utilities.base64EncodeWebSafe(sName).slice(0, 50);
+          scriptCache.put(sheetCacheKey, JSON.stringify(parsedSheetTasks), 45);
+        } catch (e) {}
       }
     }
-  } else {
-    // Fallback: กรณี API มีปัญหา ให้ใช้วิธีอ่านปกติของ SpreadsheetApp
-    Logger.log("Falling back to standard SpreadsheetApp reading");
-    const maxFallbackRow = targetSheetNames.length === 1 ? 350 : 180;
-    for (let sIdx = 0; sIdx < targetSheetNames.length; sIdx++) {
-      const sName = targetSheetNames[sIdx];
-      const sheet = ss.getSheetByName(sName);
-      if (!sheet) continue;
-      const lastRow = Math.min(sheet.getLastRow(), maxFallbackRow);
-      if (lastRow < CONFIG.DATA_START_ROW) continue;
+  }
 
-      const range = sheet.getRange(1, 1, lastRow, 14);
-      const values = range.getValues();
-      const formulas = range.getFormulas();
-      const notes = range.getNotes();
-      const colDBriefRich = sheet.getRange(1, CONFIG.COL_BRIEF_LINK, lastRow, 1).getRichTextValues();
-      const colFUploadRich = sheet.getRange(1, CONFIG.COL_UPLOAD_LINK, lastRow, 1).getRichTextValues();
+  // 3. กรองข้อมูลตามชื่อพนักงานและสถานะใน Memory (ใช้เวลาน้อยกว่า 1 มิลลิวินาที)
+  const searchName = (assignee || "").toLowerCase().trim();
+  const finalTasks = [];
 
-      let currentCategory = "";
-      let currentBriefLink = "";
-      let currentBriefTitle = "";
-
-      for (let r = CONFIG.DATA_START_ROW; r <= lastRow; r++) {
-        const rowIdx = r - 1;
-        const categoryCell = values[rowIdx][CONFIG.COL_CATEGORY_NAME - 1];
-        if (categoryCell && categoryCell.toString().trim() !== "") {
-          currentCategory = categoryCell.toString().trim();
-          currentBriefLink = "";
-          currentBriefTitle = "";
+  for (let i = 0; i < targetSheetNames.length; i++) {
+    const sName = targetSheetNames[i];
+    const sheetTasks = sheetsTasksMap[sName] || [];
+    for (let t = 0; t < sheetTasks.length; t++) {
+      const item = sheetTasks[t];
+      if (searchName && searchName !== "all") {
+        if (!item.assignee) continue;
+        const rowNameLower = item.assignee.toLowerCase();
+        if (rowNameLower !== searchName && !rowNameLower.includes(searchName)) {
+          continue;
         }
-
-        const briefVal = values[rowIdx][CONFIG.COL_BRIEF_LINK - 1];
-        const briefRich = colDBriefRich[rowIdx][0];
-        const briefFormula = formulas[rowIdx][CONFIG.COL_BRIEF_LINK - 1];
-        const extractedBrief = extractCellLinkAndTitle(briefVal, briefRich, briefFormula);
-
-        if (extractedBrief.link) currentBriefLink = extractedBrief.link;
-        if (extractedBrief.title) currentBriefTitle = extractedBrief.title;
-
-        const rowAssignee = values[rowIdx][CONFIG.COL_ASSIGNEE - 1]?.toString().trim() || "";
-        const noVal = values[rowIdx][CONFIG.COL_NO - 1];
-        const uploadCellText = values[rowIdx][CONFIG.COL_UPLOAD_LINK - 1]?.toString().trim() || "";
-        const status = values[rowIdx][CONFIG.COL_STATUS - 1]?.toString().trim() || "";
-
-        if (searchName && searchName !== "all") {
-          if (!rowAssignee || (rowAssignee.toLowerCase() !== searchName && !rowAssignee.toLowerCase().includes(searchName))) continue;
-        } else {
-          if (!rowAssignee && !noVal && !uploadCellText) continue;
-        }
-
-        const uploadRich = colFUploadRich[rowIdx][0];
-        const uploadFormula = formulas[rowIdx][CONFIG.COL_UPLOAD_LINK - 1];
-        const extractedUpload = extractCellLinkAndTitle(uploadCellText, uploadRich, uploadFormula);
-        const uploadUrl = extractedUpload.link;
-
-        const cellNote = (notes[rowIdx] && notes[rowIdx][CONFIG.COL_UPLOAD_LINK - 1]) || "";
-        let interFolderUrl = "";
-        const noteMatch = cellNote.match(/INTER:\s*(https:\/\/[^\s]+)/i);
-        if (noteMatch && noteMatch[1]) {
-          interFolderUrl = noteMatch[1].trim();
-        }
-
-        const isCompleted = status.includes("เสร็จสิ้น") || (uploadUrl !== "" && uploadCellText !== "");
-        if (pendingOnly && isCompleted) continue;
-
-        const allowDriveSearch = (Date.now() - startTime) < 3500;
-        const taskBriefLink = normalizeToPresentationUrl(
-          currentBriefLink,
-          currentBriefTitle,
-          scriptCache,
-          memoryBriefCache,
-          allowDriveSearch
-        );
-
-        const team = values[rowIdx][CONFIG.COL_TEAM - 1]?.toString().trim() || "";
-        const assignDate = values[rowIdx][CONFIG.COL_ASSIGN_DATE - 1];
-
-        tasks.push({
-          sheetName: sName,
-          row: r,
-          category: currentCategory || "ทั่วไป",
-          briefLink: taskBriefLink,
-          briefTitle: currentBriefTitle,
-          no: noVal || 1,
-          taskName: uploadCellText,
-          uploadUrl: uploadUrl,
-          interFolderUrl: interFolderUrl,
-          hasUploadLink: !!uploadUrl,
-          team: team,
-          assignee: rowAssignee,
-          assignDate: assignDate instanceof Date ? Utilities.formatDate(assignDate, "GMT+7", "dd/MM/yyyy") : assignDate,
-          status: status || "กำลังทำ",
-          isCompleted: isCompleted,
-        });
       }
+      if (pendingOnly && item.isCompleted) {
+        continue;
+      }
+      finalTasks.push(item);
     }
   }
 
@@ -991,8 +1036,8 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
     sheetName: targetSheet,
     sheets: allSheetNames,
     assignee: assignee,
-    totalFound: tasks.length,
-    tasks: tasks,
+    totalFound: finalTasks.length,
+    tasks: finalTasks,
   };
 }
 
@@ -1021,6 +1066,13 @@ function createFoldersAndSyncBatch(payload) {
   for (const sName in grouped) {
     const sheet = ss.getSheetByName(sName);
     if (!sheet) continue;
+
+    // ล้างแคชของแผ่นงานนี้ทันที เพื่อให้หลังสร้างโฟลเดอร์เสร็จ ข้อมูลใหม่แสดงผลทันที
+    try {
+      const scriptCache = CacheService.getScriptCache();
+      const sheetCacheKey = "SHEET_TASKS_V1_" + Utilities.base64EncodeWebSafe(sName).slice(0, 50);
+      scriptCache.remove(sheetCacheKey);
+    } catch (e) {}
 
     // 1. ดึง Root Folders จากแถว 3
     const { thFolder, interFolder } = getMonthlyRootFolders(sheet);
