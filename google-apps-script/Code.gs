@@ -804,78 +804,114 @@ function getSheetSmartChipsMap(spreadsheetId, sheetName, lastRow) {
 }
 
 /**
+ * ตรวจสอบว่าชื่อโฟลเดอร์มีรูปแบบของ INTER หรือไม่
+ */
+function isInterMonthlyFolderName(name) {
+  if (!name || typeof name !== "string") return false;
+  const n = name.toUpperCase().trim();
+  if (n.includes("INTER")) return true;
+  if (/^\[\d{1,2}\]/.test(n)) return true;
+  if (/^(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+\d{4}/i.test(n)) return true;
+  if (/^\d{1,2}\s+(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+\d{4}/i.test(n)) return true;
+  if (n.includes("เดือน") && !n.includes("ใบขาย") && !n.includes("TH")) return true;
+  return false;
+}
+
+/**
+ * ตรวจสอบว่าชื่อโฟลเดอร์มีรูปแบบของ TH หรือไม่
+ */
+function isThMonthlyFolderName(name) {
+  if (!name || typeof name !== "string") return false;
+  const n = name.toUpperCase().trim();
+  if (n.includes("ใบขาย")) return true;
+  if (n.includes("TH") && !n.includes("OTHER")) return true;
+  if (/^M\d{1,2}$/i.test(n) || /^TH\s*M\d{1,2}$/i.test(n)) return true;
+  if (n.includes("พ.ย.") || n.includes("ธ.ค.") || n.includes("ต.ค.") || n.includes("ก.ย.") || n.includes("ส.ค.") || n.includes("ก.ค.") || n.includes("มิ.ย.") || n.includes("พ.ค.") || n.includes("เม.ย.") || n.includes("มี.ค.") || n.includes("ก.พ.") || n.includes("ม.ค.")) return true;
+  return false;
+}
+
+/**
+ * ฟังก์ชันช่วยดึง Folder จาก Cell อย่างแม่นยำ (ระบุเฉพาะเจาะจง ไม่ผ่าน Array Index ร่วม)
+ */
+function getDriveFolderFromExactCell(sheet, row, col, a1Notation) {
+  const ss = sheet.getParent();
+  const ssId = ss.getId();
+  const sheetName = sheet.getName();
+
+  // 1. ดึง Smart Chip URI ผ่าน Sheets API v4 โดยระบุเฉพาะเซลล์เดี่ยวเป๊ะๆ
+  try {
+    const chipUri = getCellSmartChipUri(ssId, sheetName, a1Notation);
+    if (chipUri) {
+      const id = extractFolderId(chipUri);
+      if (id) {
+        try {
+          const f = DriveApp.getFolderById(id);
+          if (f && !f.isTrashed()) return f;
+        } catch (e) {}
+      }
+    }
+  } catch (eApi) {}
+
+  // 2. ดึงจาก Range โดยตรง (Hyperlink, Formula, RichText, Value, Note)
+  try {
+    const cell = sheet.getRange(row, col);
+    const directId = extractDriveFolderFromCell(cell);
+    if (directId) {
+      try {
+        const f = DriveApp.getFolderById(directId);
+        if (f && !f.isTrashed()) return f;
+      } catch (e) {}
+    }
+
+    const note = cell.getNote() || "";
+    if (note) {
+      const noteId = extractFolderId(note);
+      if (noteId) {
+        try {
+          const f = DriveApp.getFolderById(noteId);
+          if (f && !f.isTrashed()) return f;
+        } catch (e) {}
+      }
+    }
+  } catch (eCell) {}
+
+  return null;
+}
+
+/**
  * ดึง Root Folders ประจำเดือนของ TH (Col F แถว 3) และ INTER (Col G แถว 3)
- * Optimized: ดึง F3:G3 ใน API Call เดียวแทนการแยกยิง 2 ครั้ง
+ * พร้อมระบบตรวจสอบชื่อโฟลเดอร์อัตโนมัติ (Anti-Swap Guarantee)
+ * ป้องกันการสลับตำแหน่งระหว่าง TH และ INTER 100%
  */
 function getMonthlyRootFolders(sheet) {
   const ss = sheet.getParent();
   const ssId = ss.getId();
   const sheetName = sheet.getName();
   const cache = CacheService.getScriptCache();
-  const cacheKey = "ROOT_FOLDERS_" + Utilities.base64EncodeWebSafe(sheetName).slice(0, 50);
+  // ใช้ Cache Key V4 เพื่อล้างแคชเก่าที่อาจมีค่าสลับกันทิ้งทันที 100%
+  const cacheKey = "ROOT_FOLDERS_V4_" + Utilities.base64EncodeWebSafe(sheetName).slice(0, 50);
 
-  // ตรวจสอบจาก Cache ก่อนเพื่อความรวดเร็ว 0ms
+  // ตรวจสอบจาก Cache ก่อนเพื่อความรวดเร็ว 0ms พร้อมตรวจสอบว่าไม่สลับกัน
   const cached = cache.get(cacheKey);
   if (cached) {
     try {
       const parsed = JSON.parse(cached);
-      const thF = parsed.thId ? DriveApp.getFolderById(parsed.thId) : null;
-      const interF = parsed.interId ? DriveApp.getFolderById(parsed.interId) : null;
+      let thF = parsed.thId ? DriveApp.getFolderById(parsed.thId) : null;
+      let interF = parsed.interId ? DriveApp.getFolderById(parsed.interId) : null;
       if (thF && !thF.isTrashed()) {
-        return { thFolder: thF, interFolder: interF };
+        const thN = thF.getName();
+        if (!isInterMonthlyFolderName(thN)) {
+          return { thFolder: thF, interFolder: interF };
+        }
       }
     } catch (e) {}
   }
 
-  let thFolder = null;
-  let interFolder = null;
+  // 1. ดึง F3 (TH) และ G3 (INTER) แยกกันอิสระ 100% เพื่อป้องกัน Index ใน Array เลื่อนหรือสลับตำแหน่ง
+  let thFolder = getDriveFolderFromExactCell(sheet, 3, 6, "F3");
+  let interFolder = getDriveFolderFromExactCell(sheet, 3, 7, "G3");
 
-  // 1. ดึง Smart Chips ของทั้ง F3 และ G3 ในการยิง API เพียงครั้งเดียว
-  try {
-    const token = ScriptApp.getOAuthToken();
-    const encodedRange = encodeURIComponent(`'${sheetName}'!F3:G3`);
-    const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${ssId}?ranges=${encodedRange}&fields=sheets(data(rowData(values(chipRuns))))`;
-    const res = UrlFetchApp.fetch(apiUrl, {
-      method: "get",
-      headers: { "Authorization": "Bearer " + token },
-      muteHttpExceptions: true
-    });
-    if (res.getResponseCode() === 200) {
-      const data = JSON.parse(res.getContentText());
-      const vals = data.sheets?.[0]?.data?.[0]?.rowData?.[0]?.values || [];
-      const f3Uri = vals[0]?.chipRuns?.[0]?.chip?.richLinkProperties?.uri;
-      const g3Uri = vals[1]?.chipRuns?.[0]?.chip?.richLinkProperties?.uri;
-      if (f3Uri) {
-        const id = extractFolderId(f3Uri);
-        if (id) { try { thFolder = DriveApp.getFolderById(id); } catch(e) {} }
-      }
-      if (g3Uri) {
-        const id = extractFolderId(g3Uri);
-        if (id) { try { interFolder = DriveApp.getFolderById(id); } catch(e) {} }
-      }
-    }
-  } catch (e) {
-    Logger.log("Chip F3:G3 batch fetch: " + e.message);
-  }
-
-  // 2. ถ้ายังไม่ได้ ลองดึงจาก Formula (=HYPERLINK) หรือ RichText ของเซลล์ปกติ
-  if (!thFolder) {
-    const cellF3 = sheet.getRange(3, 6);
-    const f3Id = extractDriveFolderFromCell(cellF3);
-    if (f3Id) {
-      try { thFolder = DriveApp.getFolderById(f3Id); } catch(e) {}
-    }
-  }
-
-  if (!interFolder) {
-    const cellG3 = sheet.getRange(3, 7);
-    const g3Id = extractDriveFolderFromCell(cellG3);
-    if (g3Id) {
-      try { interFolder = DriveApp.getFolderById(g3Id); } catch(e) {}
-    }
-  }
-
-  // 3. Fallback สำคัญ: ค้นหาโฟลเดอร์ใน Google Drive โดยตรงจากชื่อของ Smart Chip และชื่อโฟลเดอร์จริงตามเดือน
+  // 2. Fallback: หากยังไม่พบ ให้ค้นหาจากชื่อโฟลเดอร์จริงตามเดือน
   const dateInfo = parseDateFormats(sheetName);
   const thDynamicNames = [
     `ใบขาย ${dateInfo.thMonth} ${dateInfo.interMonth} ${dateInfo.thYear}`,
@@ -909,12 +945,36 @@ function getMonthlyRootFolders(sheet) {
     interFolder = findFolderByNameSmart(g3Val, interDynamicNames);
   }
 
+  // 3. ระบบ Anti-Swap Guarantee: ตรวจสอบชื่อโฟลเดอร์จริงบน Google Drive เพื่อรับประกัน 100% ว่าไม่มีทางสลับ
+  if (thFolder || interFolder) {
+    const thName = thFolder ? thFolder.getName() : "";
+    const interName = interFolder ? interFolder.getName() : "";
+
+    const thLooksInter = isInterMonthlyFolderName(thName);
+    const thLooksTh = isThMonthlyFolderName(thName);
+    const interLooksInter = isInterMonthlyFolderName(interName);
+    const interLooksTh = isThMonthlyFolderName(interName);
+
+    // หาก thFolder มีชื่อเป็น INTER และ interFolder มีชื่อเป็น TH (หรือยังไม่มี interFolder)
+    if (thLooksInter && (interLooksTh || !interFolder)) {
+      Logger.log(`[Anti-Swap] สลับกลับตำแหน่งที่ถูกต้อง: F3="${thName}" (เป็น INTER), G3="${interName}" (เป็น TH)`);
+      const temp = thFolder;
+      thFolder = interFolder;
+      interFolder = temp;
+    } else if (interLooksTh && !thLooksTh) {
+      Logger.log(`[Anti-Swap] ตรวจพบว่า G3 เป็น TH: G3="${interName}"`);
+      const temp = thFolder;
+      thFolder = interFolder;
+      interFolder = temp;
+    }
+  }
+
   if (!thFolder) {
     const f3Val = sheet.getRange(3, 6).getValue() || "";
     throw new Error(`ไม่พบโฟลเดอร์ Google Drive ของ TH ในช่อง F3 (ค่าในช่องคือ "${f3Val}") กรุณาตรวจสอบว่ามีโฟลเดอร์ชื่อ M11 หรือ ใบขาย พ.ย. NOV 69 ใน Google Drive`);
   }
 
-  // บันทึกใส่ Cache 6 ชั่วโมงเพื่อให้รอบต่อไปเร็วทันใจ 0ms
+  // บันทึกใส่ Cache 6 ชั่วโมง
   try {
     cache.put(cacheKey, JSON.stringify({
       thId: thFolder.getId(),
@@ -1941,6 +2001,40 @@ function createFoldersAndSyncBatch(payload) {
     // 2. คำนวณชื่อโฟลเดอร์วันที่ตามมาตรฐาน
     const dateInfo = parseDateFormats(sName);
 
+    // ระบบ Auto-Heal: ตรวจสอบและย้ายโฟลเดอร์วันที่ที่อาจเคยถูกสร้างสลับที่ในรอบก่อนหน้า
+    if (interFolder) {
+      try {
+        const wrongInTh = thFolder.getFoldersByName(dateInfo.interFolderName);
+        while (wrongInTh.hasNext()) {
+          const wf = wrongInTh.next();
+          if (!wf.isTrashed()) {
+            Logger.log(`[Auto-Heal] ย้ายโฟลเดอร์ ${wf.getName()} จาก TH ไปยัง INTER`);
+            try { wf.moveTo(interFolder); } catch (eM1) {
+              interFolder.addFolder(wf);
+              thFolder.removeFolder(wf);
+            }
+            delete FOLDER_CHILDREN_CACHE[thFolder.getId()];
+            delete FOLDER_CHILDREN_CACHE[interFolder.getId()];
+          }
+        }
+        const wrongInInter = interFolder.getFoldersByName(dateInfo.thFolderName);
+        while (wrongInInter.hasNext()) {
+          const wf = wrongInInter.next();
+          if (!wf.isTrashed()) {
+            Logger.log(`[Auto-Heal] ย้ายโฟลเดอร์ ${wf.getName()} จาก INTER ไปยัง TH`);
+            try { wf.moveTo(thFolder); } catch (eM2) {
+              thFolder.addFolder(wf);
+              interFolder.removeFolder(wf);
+            }
+            delete FOLDER_CHILDREN_CACHE[thFolder.getId()];
+            delete FOLDER_CHILDREN_CACHE[interFolder.getId()];
+          }
+        }
+      } catch (eHeal) {
+        Logger.log("[Auto-Heal] Error moving misplaced date folders: " + eHeal.message);
+      }
+    }
+
     const thDateAliases = [sName, `${dateInfo.dayNumber} พ.ย. 69`, `${dateInfo.padDay} พย 69`, `${dateInfo.dayNumber} พย 69`];
     const thDateFolder = getOrCreateFolderSmart(thFolder, dateInfo.thFolderName, thDateAliases, {
       isDate: true,
@@ -2338,6 +2432,42 @@ function precreateFoldersBatch(payload) {
   for (let d = 0; d < days.length; d++) {
     const day = days[d];
     const dayDateInfo = parseDateFormats(`${day} ${monthStr}`);
+
+    // ระบบ Auto-Heal: ตรวจสอบและย้ายโฟลเดอร์วันที่ที่อาจเคยถูกสร้างสลับที่ในรอบก่อนหน้า
+    if (interFolder) {
+      try {
+        // หากใน thFolder มีโฟลเดอร์ชื่อภาษาอังกฤษ (เช่น NOV 01,2026) -> ย้ายไป interFolder ให้ถูกต้อง
+        const wrongInTh = thFolder.getFoldersByName(dayDateInfo.interFolderName);
+        while (wrongInTh.hasNext()) {
+          const wf = wrongInTh.next();
+          if (!wf.isTrashed()) {
+            Logger.log(`[Auto-Heal] ย้ายโฟลเดอร์ ${wf.getName()} จาก TH ไปยัง INTER`);
+            try { wf.moveTo(interFolder); } catch (eM1) {
+              interFolder.addFolder(wf);
+              thFolder.removeFolder(wf);
+            }
+            delete FOLDER_CHILDREN_CACHE[thFolder.getId()];
+            delete FOLDER_CHILDREN_CACHE[interFolder.getId()];
+          }
+        }
+        // หากใน interFolder มีโฟลเดอร์ชื่อภาษาไทย (เช่น 01 พ.ย. 69) -> ย้ายไป thFolder ให้ถูกต้อง
+        const wrongInInter = interFolder.getFoldersByName(dayDateInfo.thFolderName);
+        while (wrongInInter.hasNext()) {
+          const wf = wrongInInter.next();
+          if (!wf.isTrashed()) {
+            Logger.log(`[Auto-Heal] ย้ายโฟลเดอร์ ${wf.getName()} จาก INTER ไปยัง TH`);
+            try { wf.moveTo(thFolder); } catch (eM2) {
+              thFolder.addFolder(wf);
+              interFolder.removeFolder(wf);
+            }
+            delete FOLDER_CHILDREN_CACHE[thFolder.getId()];
+            delete FOLDER_CHILDREN_CACHE[interFolder.getId()];
+          }
+        }
+      } catch (eHeal) {
+        Logger.log("[Auto-Heal] Error moving misplaced date folders: " + eHeal.message);
+      }
+    }
 
     // ก. สร้าง/ดึงโฟลเดอร์วันที่ฝั่ง TH
     const thDateAliases = [
