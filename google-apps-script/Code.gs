@@ -677,13 +677,12 @@ function getSheetNamesFast(ss) {
 
 /**
  * ฟังก์ชันช่วยดึงข้อมูลชีตแบบ Ultra-Fast ผ่าน Google Sheets API v4 ในครั้งเดียว
- * ได้ทั้งค่าข้อความ, Hyperlink, Smart Chip URI และ Note โดยไม่ต้องเรียก getRichTextValues() ที่ช้า
+ * ใช้ช่วง A1:L เพื่อตัด Header และคอลัมน์ที่ไม่ใช้ออก ลดขนาด JSON ลงให้โหลดไวระดับมิลลิวินาที
  */
 function fetchSheetsGridDataFast(spreadsheetId, sheetNames) {
   try {
     const token = ScriptApp.getOAuthToken();
-    // ลดจำนวนแถวและดึง A1:L ให้พอดีกับงานจริง เพื่อให้ Payload เล็กและโหลดกลับมาในเสี้ยววินาที
-    const maxRow = sheetNames.length === 1 ? 250 : 140;
+    const maxRow = sheetNames.length === 1 ? 220 : 120;
     const rangesParam = sheetNames
       .map(name => `ranges=${encodeURIComponent(`'${name}'!A1:L${maxRow}`)}`)
       .join("&");
@@ -777,10 +776,28 @@ function extractApiCellInfo(cellObj) {
 }
 
 /**
- * ดึงรายการงานตามชื่อพนักงาน (Instant Version: แคชข้อมูลระดับแผ่นงาน + กรองใน Memory ทันที)
+ * แปลงลิงก์ใบบรีฟแบบ Instant 0ms (ไม่เรียก DriveApp ระหว่างค้นหาเด็ดขาด เพื่อให้ผลลัพธ์เด้งทันที)
+ */
+function fastFormatPresentationUrl(rawUrl) {
+  const url = (rawUrl || "").toString().trim();
+  if (!url) return "";
+  if (url.includes("docs.google.com/presentation/d/")) return url;
+
+  if (!url.includes("/folders/")) {
+    const dMatch = url.match(/\/d\/([-\w]{25,})/i);
+    const idMatch = url.match(/[?&]id=([-\w]{25,})/i);
+    const fileId = (dMatch && dMatch[1]) || (idMatch && idMatch[1]);
+    if (fileId) {
+      return `https://docs.google.com/presentation/d/${fileId}/edit`;
+    }
+  }
+  return url;
+}
+
+/**
+ * ดึงรายการงานตามชื่อพนักงาน (Zero-Wait Version: Batch Cache getAll/putAll + ตัด DriveApp Search 100%)
  */
 function getStaffTasks(assignee, targetSheet, pendingOnly) {
-  const startTime = Date.now();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const ssId = ss.getId();
   const scriptCache = CacheService.getScriptCache();
@@ -795,31 +812,40 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
     }
   } else {
     const sortedSheets = sortSheetNamesDesc(allSheetNames);
-    const limitSheets = (assignee && assignee !== "ALL") ? 8 : 5;
+    const limitSheets = (assignee && assignee !== "ALL") ? 7 : 4;
     targetSheetNames = sortedSheets.slice(0, limitSheets);
   }
 
-  const memoryBriefCache = {};
   const sheetsTasksMap = {};
   const sheetsToFetchFromApi = [];
+  const cacheKeyMap = {};
+  const cacheKeysToRequest = [];
 
-  // 1. ตรวจสอบว่าแผ่นงานไหนมีข้อมูลอยู่ใน Instant Cache แล้วบ้าง (ช่วยให้กดค้นหาซ้ำหรือสลับชื่อเห็นงานทันทีใน 0.05 วินาที)
   for (let i = 0; i < targetSheetNames.length; i++) {
     const sName = targetSheetNames[i];
-    const sheetCacheKey = "SHEET_TASKS_V1_" + Utilities.base64EncodeWebSafe(sName).slice(0, 50);
-    const cachedSheetTasks = scriptCache.get(sheetCacheKey);
-    if (cachedSheetTasks) {
+    const key = "FAST_TASKS_V2_" + Utilities.base64EncodeWebSafe(sName).slice(0, 50);
+    cacheKeyMap[sName] = key;
+    cacheKeysToRequest.push(key);
+  }
+
+  // 1. ดึงข้อมูลทุกแผ่นงานจาก Cache ในคำสั่งเดียว (Batch getAll เร็วกว่าดึงทีละอันมาก)
+  const cachedBatch = scriptCache.getAll(cacheKeysToRequest);
+  for (let i = 0; i < targetSheetNames.length; i++) {
+    const sName = targetSheetNames[i];
+    const key = cacheKeyMap[sName];
+    if (cachedBatch && cachedBatch[key]) {
       try {
-        sheetsTasksMap[sName] = JSON.parse(cachedSheetTasks);
+        sheetsTasksMap[sName] = JSON.parse(cachedBatch[key]);
         continue;
       } catch (e) {}
     }
     sheetsToFetchFromApi.push(sName);
   }
 
-  // 2. ดึงผ่าน API เฉพาะแผ่นงานที่ยังไม่อยู่ใน Cache
+  // 2. แผ่นงานไหนยังไม่อยู่ใน Cache ให้ดึงด้วย Sheets API v4 รวดเดียวแล้วบันทึกเข้า Batch Cache นาน 5 นาที (300 วินาที)
   if (sheetsToFetchFromApi.length > 0) {
     const apiData = fetchSheetsGridDataFast(ssId, sheetsToFetchFromApi);
+    const cacheToPut = {};
 
     if (apiData && apiData.sheets && apiData.sheets.length > 0) {
       for (let sIdx = 0; sIdx < apiData.sheets.length; sIdx++) {
@@ -837,7 +863,6 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
           const vals = rowData[rowIdx]?.values;
           if (!vals || vals.length === 0) continue;
 
-          // จัดการหมวดหมู่ (Col C)
           const categoryCell = vals[CONFIG.COL_CATEGORY_NAME - 1]?.formattedValue;
           if (categoryCell && categoryCell.toString().trim() !== "") {
             currentCategory = categoryCell.toString().trim();
@@ -845,7 +870,6 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
             currentBriefTitle = "";
           }
 
-          // จัดการใบบรีฟ (Col D)
           const briefInfo = extractApiCellInfo(vals[CONFIG.COL_BRIEF_LINK - 1]);
           if (briefInfo.link) currentBriefLink = briefInfo.link;
           if (briefInfo.title) currentBriefTitle = briefInfo.title;
@@ -867,17 +891,7 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
           }
 
           const isCompleted = status.includes("เสร็จสิ้น") || (uploadUrl !== "" && uploadCellText !== "");
-
-          // แปลงลิงก์ใบบรีฟให้เป็น Google Slides Presentation (จำกัดเวลาค้นหา Drive สดไม่เกิน 1.2 วินาที เพื่อความเร็วสูงสุด)
-          const allowDriveSearch = (Date.now() - startTime) < 1200;
-          const taskBriefLink = normalizeToPresentationUrl(
-            currentBriefLink,
-            currentBriefTitle,
-            scriptCache,
-            memoryBriefCache,
-            allowDriveSearch
-          );
-
+          const taskBriefLink = fastFormatPresentationUrl(currentBriefLink);
           const team = (vals[CONFIG.COL_TEAM - 1]?.formattedValue || "").toString().trim();
           const assignDate = vals[CONFIG.COL_ASSIGN_DATE - 1]?.formattedValue || "";
 
@@ -901,114 +915,19 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
         }
 
         sheetsTasksMap[sheetName] = parsedSheetTasks;
-        // แคชข้อมูลของแผ่นงานนี้ไว้ 45 วินาที (ค้นหาครั้งต่อไปจะแสดงผลทันทีแบบไม่ต้องรอโหลดชีตใหม่)
-        try {
-          const sheetCacheKey = "SHEET_TASKS_V1_" + Utilities.base64EncodeWebSafe(sheetName).slice(0, 50);
-          scriptCache.put(sheetCacheKey, JSON.stringify(parsedSheetTasks), 45);
-        } catch (e) {}
+        const cKey = cacheKeyMap[sheetName] || ("FAST_TASKS_V2_" + Utilities.base64EncodeWebSafe(sheetName).slice(0, 50));
+        cacheToPut[cKey] = JSON.stringify(parsedSheetTasks);
       }
-    } else {
-      // Fallback: ดึงผ่าน SpreadsheetApp เฉพาะแผ่นงานที่ API มีปัญหา
-      Logger.log("Falling back to standard SpreadsheetApp reading for: " + sheetsToFetchFromApi.join(", "));
-      for (let sIdx = 0; sIdx < sheetsToFetchFromApi.length; sIdx++) {
-        const sName = sheetsToFetchFromApi[sIdx];
-        const sheet = ss.getSheetByName(sName);
-        if (!sheet) continue;
-        const maxFallbackRow = sheetsToFetchFromApi.length === 1 ? 250 : 140;
-        const lastRow = Math.min(sheet.getLastRow(), maxFallbackRow);
-        if (lastRow < CONFIG.DATA_START_ROW) continue;
 
-        const range = sheet.getRange(1, 1, lastRow, 12);
-        const values = range.getValues();
-        const formulas = range.getFormulas();
-        const notes = range.getNotes();
-        const colDBriefRich = sheet.getRange(1, CONFIG.COL_BRIEF_LINK, lastRow, 1).getRichTextValues();
-        const colFUploadRich = sheet.getRange(1, CONFIG.COL_UPLOAD_LINK, lastRow, 1).getRichTextValues();
-        const parsedSheetTasks = [];
-
-        let currentCategory = "";
-        let currentBriefLink = "";
-        let currentBriefTitle = "";
-
-        for (let r = CONFIG.DATA_START_ROW; r <= lastRow; r++) {
-          const rowIdx = r - 1;
-          const categoryCell = values[rowIdx][CONFIG.COL_CATEGORY_NAME - 1];
-          if (categoryCell && categoryCell.toString().trim() !== "") {
-            currentCategory = categoryCell.toString().trim();
-            currentBriefLink = "";
-            currentBriefTitle = "";
-          }
-
-          const briefVal = values[rowIdx][CONFIG.COL_BRIEF_LINK - 1];
-          const briefRich = colDBriefRich[rowIdx][0];
-          const briefFormula = formulas[rowIdx][CONFIG.COL_BRIEF_LINK - 1];
-          const extractedBrief = extractCellLinkAndTitle(briefVal, briefRich, briefFormula);
-
-          if (extractedBrief.link) currentBriefLink = extractedBrief.link;
-          if (extractedBrief.title) currentBriefTitle = extractedBrief.title;
-
-          const rowAssignee = values[rowIdx][CONFIG.COL_ASSIGNEE - 1]?.toString().trim() || "";
-          const noVal = values[rowIdx][CONFIG.COL_NO - 1];
-          const uploadCellText = values[rowIdx][CONFIG.COL_UPLOAD_LINK - 1]?.toString().trim() || "";
-          const status = values[rowIdx][CONFIG.COL_STATUS - 1]?.toString().trim() || "";
-
-          if (!rowAssignee && !noVal && !uploadCellText) continue;
-
-          const uploadRich = colFUploadRich[rowIdx][0];
-          const uploadFormula = formulas[rowIdx][CONFIG.COL_UPLOAD_LINK - 1];
-          const extractedUpload = extractCellLinkAndTitle(uploadCellText, uploadRich, uploadFormula);
-          const uploadUrl = extractedUpload.link;
-
-          const cellNote = (notes[rowIdx] && notes[rowIdx][CONFIG.COL_UPLOAD_LINK - 1]) || "";
-          let interFolderUrl = "";
-          const noteMatch = cellNote.match(/INTER:\s*(https:\/\/[^\s]+)/i);
-          if (noteMatch && noteMatch[1]) {
-            interFolderUrl = noteMatch[1].trim();
-          }
-
-          const isCompleted = status.includes("เสร็จสิ้น") || (uploadUrl !== "" && uploadCellText !== "");
-
-          const allowDriveSearch = (Date.now() - startTime) < 1200;
-          const taskBriefLink = normalizeToPresentationUrl(
-            currentBriefLink,
-            currentBriefTitle,
-            scriptCache,
-            memoryBriefCache,
-            allowDriveSearch
-          );
-
-          const team = values[rowIdx][CONFIG.COL_TEAM - 1]?.toString().trim() || "";
-          const assignDate = values[rowIdx][CONFIG.COL_ASSIGN_DATE - 1];
-
-          parsedSheetTasks.push({
-            sheetName: sName,
-            row: r,
-            category: currentCategory || "ทั่วไป",
-            briefLink: taskBriefLink,
-            briefTitle: currentBriefTitle,
-            no: noVal || 1,
-            taskName: uploadCellText,
-            uploadUrl: uploadUrl,
-            interFolderUrl: interFolderUrl,
-            hasUploadLink: !!uploadUrl,
-            team: team,
-            assignee: rowAssignee,
-            assignDate: assignDate instanceof Date ? Utilities.formatDate(assignDate, "GMT+7", "dd/MM/yyyy") : assignDate,
-            status: status || "กำลังทำ",
-            isCompleted: isCompleted,
-          });
+      try {
+        if (Object.keys(cacheToPut).length > 0) {
+          scriptCache.putAll(cacheToPut, 300); // แคชไว้นาน 5 นาที
         }
-
-        sheetsTasksMap[sName] = parsedSheetTasks;
-        try {
-          const sheetCacheKey = "SHEET_TASKS_V1_" + Utilities.base64EncodeWebSafe(sName).slice(0, 50);
-          scriptCache.put(sheetCacheKey, JSON.stringify(parsedSheetTasks), 45);
-        } catch (e) {}
-      }
+      } catch (e) {}
     }
   }
 
-  // 3. กรองข้อมูลตามชื่อพนักงานและสถานะใน Memory (ใช้เวลาน้อยกว่า 1 มิลลิวินาที)
+  // 3. กรองข้อมูลใน Memory ทันที (ใช้เวลา < 1ms)
   const searchName = (assignee || "").toLowerCase().trim();
   const finalTasks = [];
 
@@ -1042,10 +961,117 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
 }
 
 /**
- * สร้างโฟลเดอร์ Google Drive สำหรับ TH และ INTER ตามรูปแบบมาตรฐาน
+ * ฟังก์ชันช่วยเขียน Smart Chip แท้ๆ (Google Drive Chip) + Note + เปลี่ยนสถานะ ลงใน Google Sheets ด้วย Sheets API v4
+ */
+function writeSmartChipsBatchToSheet(spreadsheetId, sheet, updates) {
+  if (!updates || updates.length === 0) return;
+  const sheetId = sheet.getSheetId();
+  const requests = [];
+
+  for (let i = 0; i < updates.length; i++) {
+    const u = updates[i];
+    const rowIndex = u.row - 1; // 0-based index สำหรับ Sheets API v4
+
+    // 1. เขียน Smart Chip (chipRuns) + Note (ลิงก์ INTER) ลงในช่อง Col F (index 5)
+    const cellDataF = {
+      userEnteredValue: { stringValue: u.taskName },
+      chipRuns: [
+        {
+          startIndex: 0,
+          chip: {
+            richLinkProperties: {
+              uri: u.thUrl
+            }
+          }
+        }
+      ]
+    };
+    if (u.interUrl) {
+      cellDataF.note = `INTER: ${u.interUrl}`;
+    }
+
+    requests.push({
+      updateCells: {
+        range: {
+          sheetId: sheetId,
+          startRowIndex: rowIndex,
+          endRowIndex: rowIndex + 1,
+          startColumnIndex: CONFIG.COL_UPLOAD_LINK - 1,
+          endColumnIndex: CONFIG.COL_UPLOAD_LINK
+        },
+        rows: [{ values: [cellDataF] }],
+        fields: u.interUrl ? "userEnteredValue,chipRuns,note" : "userEnteredValue,chipRuns"
+      }
+    });
+
+    // 2. เปลี่ยนสถานะ Col L เป็น "เสร็จสิ้น ✅" ใน Batch เดียวกัน
+    requests.push({
+      updateCells: {
+        range: {
+          sheetId: sheetId,
+          startRowIndex: rowIndex,
+          endRowIndex: rowIndex + 1,
+          startColumnIndex: CONFIG.COL_STATUS - 1,
+          endColumnIndex: CONFIG.COL_STATUS
+        },
+        rows: [{
+          values: [{
+            userEnteredValue: { stringValue: "เสร็จสิ้น ✅" }
+          }]
+        }],
+        fields: "userEnteredValue"
+      }
+    });
+  }
+
+  let apiSuccess = false;
+  try {
+    const token = ScriptApp.getOAuthToken();
+    const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`;
+    const res = UrlFetchApp.fetch(apiUrl, {
+      method: "post",
+      contentType: "application/json",
+      headers: { "Authorization": "Bearer " + token },
+      payload: JSON.stringify({ requests: requests }),
+      muteHttpExceptions: true
+    });
+    if (res.getResponseCode() === 200) {
+      apiSuccess = true;
+    } else {
+      Logger.log("SmartChip batchUpdate fallback: " + res.getContentText());
+    }
+  } catch (e) {
+    Logger.log("SmartChip batchUpdate error: " + e.message);
+  }
+
+  // Fallback: หาก Sheets API ไม่ยอมรับ chipRuns ในบางสิทธิ์ ให้วาง RichText Hyperlink แทนเพื่อให้งานไม่สะดุด
+  if (!apiSuccess) {
+    for (let i = 0; i < updates.length; i++) {
+      const u = updates[i];
+      const cellF = sheet.getRange(u.row, CONFIG.COL_UPLOAD_LINK);
+      const richValue = SpreadsheetApp.newRichTextValue()
+        .setText(u.taskName)
+        .setLinkUrl(u.thUrl)
+        .build();
+      cellF.setRichTextValue(richValue);
+      if (u.interUrl) {
+        try { cellF.setNote(`INTER: ${u.interUrl}`); } catch (e) {}
+      }
+      const cellL = sheet.getRange(u.row, CONFIG.COL_STATUS);
+      try { cellL.setValue("เสร็จสิ้น ✅"); } catch (e1) {
+        try { cellL.setValue("เสร็จสิ้น"); } catch (e2) {}
+      }
+    }
+  }
+}
+
+/**
+ * สร้างโฟลเดอร์ Google Drive สำหรับ TH และ INTER และวางลิงก์เป็น Smart Chip
  */
 function createFoldersAndSyncBatch(payload) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ssId = ss.getId();
+  const scriptCache = CacheService.getScriptCache();
   const tasks = payload.tasks || [];
   if (tasks.length === 0) {
     throw new Error("ไม่มีรายการงานที่เลือก");
@@ -1067,24 +1093,15 @@ function createFoldersAndSyncBatch(payload) {
     const sheet = ss.getSheetByName(sName);
     if (!sheet) continue;
 
-    // ล้างแคชของแผ่นงานนี้ทันที เพื่อให้หลังสร้างโฟลเดอร์เสร็จ ข้อมูลใหม่แสดงผลทันที
-    try {
-      const scriptCache = CacheService.getScriptCache();
-      const sheetCacheKey = "SHEET_TASKS_V1_" + Utilities.base64EncodeWebSafe(sName).slice(0, 50);
-      scriptCache.remove(sheetCacheKey);
-    } catch (e) {}
-
     // 1. ดึง Root Folders จากแถว 3
     const { thFolder, interFolder } = getMonthlyRootFolders(sheet);
 
     // 2. คำนวณชื่อโฟลเดอร์วันที่ตามมาตรฐาน (เช่น "07 พ.ย. 69" และ "NOV 07,2026")
     const dateInfo = parseDateFormats(sName);
 
-    // สร้าง/ค้นหาโฟลเดอร์วันที่ฝั่ง TH: "07 พ.ย. 69" (หรือชื่อ "7 พย", "07 พย 69")
     const thDateAliases = [sName, `${dateInfo.dayNumber} พ.ย. 69`, `${dateInfo.padDay} พย 69`];
     const thDateFolder = getOrCreateFolderFlexible(thFolder, dateInfo.thFolderName, thDateAliases);
 
-    // สร้าง/ค้นหาโฟลเดอร์วันที่ฝั่ง INTER: "NOV 07,2026"
     let interDateFolder = null;
     if (interFolder) {
       const interAliases = [`NOV ${dateInfo.dayNumber},2026`, `${dateInfo.padDay} NOV 2026`];
@@ -1092,30 +1109,30 @@ function createFoldersAndSyncBatch(payload) {
     }
 
     const sheetTasks = grouped[sName];
+    const sheetUpdates = [];
+
     for (let t = 0; t < sheetTasks.length; t++) {
       const task = sheetTasks[t];
       const rawCategory = task.category || "ทั่วไป";
       const taskName = task.taskName || `${task.no || 1}_${rawCategory}`;
       const row = task.row;
 
-      // 3. หมวดหมู่ฝั่ง TH (เช่น "หวย APB", "สล็อต SLOT", "คาสิโน CASINO")
+      // 3. หมวดหมู่ฝั่ง TH
       const thCatTargetName = CATEGORY_MAP_TH[rawCategory] || rawCategory;
-      const thCatAliases = [rawCategory];
-      const thCatFolder = getOrCreateFolderFlexible(thDateFolder, thCatTargetName, thCatAliases);
+      const thCatFolder = getOrCreateFolderFlexible(thDateFolder, thCatTargetName, [rawCategory]);
 
-      // 4. หมวดหมู่ฝั่ง INTER (เช่น "APB", "SLOT", "CASINO", "FOOTBALL")
+      // 4. หมวดหมู่ฝั่ง INTER
       let interCatFolder = null;
       if (interDateFolder) {
         const interCatTargetName = CATEGORY_MAP_INTER[rawCategory] || rawCategory;
-        const interCatAliases = [rawCategory];
-        interCatFolder = getOrCreateFolderFlexible(interDateFolder, interCatTargetName, interCatAliases);
+        interCatFolder = getOrCreateFolderFlexible(interDateFolder, interCatTargetName, [rawCategory]);
       }
 
-      // 5. โฟลเดอร์งานฝั่ง TH: ตั้งชื่อตามชื่องาน (เช่น "2 หวยรอบเที่ยง แจกโชคหลักล้าน ที่ APB")
+      // 5. โฟลเดอร์งานฝั่ง TH
       const thTaskFolder = getOrCreateFolderFlexible(thCatFolder, taskName, []);
       const thUrl = thTaskFolder.getUrl();
 
-      // 6. โฟลเดอร์งานฝั่ง INTER: "2 (07.11)" หรือตามลำดับงาน
+      // 6. โฟลเดอร์งานฝั่ง INTER
       let interUrl = "";
       if (interCatFolder) {
         const interTaskName = `${task.no || 1} (${dateInfo.interDateSuffix})`;
@@ -1129,34 +1146,12 @@ function createFoldersAndSyncBatch(payload) {
         interUrl = interTaskFolder.getUrl();
       }
 
-      // 7. เขียน Link กลับเข้า Google Sheets ใน Col F (Link อัปไฟล์งาน)
-      const cellF = sheet.getRange(row, CONFIG.COL_UPLOAD_LINK);
-      const richValue = SpreadsheetApp.newRichTextValue()
-        .setText(taskName)
-        .setLinkUrl(thUrl)
-        .build();
-      cellF.setRichTextValue(richValue);
-
-      // แนบลิงก์ INTER ไว้ใน Note ของเซลล์ Col F เพื่อให้เปิดได้ทั้งสองลิงก์เสมอ
-      if (interUrl) {
-        try {
-          cellF.setNote(`INTER: ${interUrl}`);
-        } catch (e) {
-          Logger.log(`ไม่สามารถบันทึก Note ในแถว ${row}: ${e.message}`);
-        }
-      }
-
-      // 8. เปลี่ยนสถานะ Col L เป็น "เสร็จสิ้น ✅" ตามกฎ Data Validation ของชีต
-      const cellL = sheet.getRange(row, CONFIG.COL_STATUS);
-      try {
-        cellL.setValue("เสร็จสิ้น ✅");
-      } catch (e1) {
-        try {
-          cellL.setValue("เสร็จสิ้น");
-        } catch (e2) {
-          Logger.log(`ไม่สามารถตั้งค่าสถานะแถว ${row}: ${e2.message}`);
-        }
-      }
+      sheetUpdates.push({
+        row: row,
+        taskName: taskName,
+        thUrl: thUrl,
+        interUrl: interUrl
+      });
 
       results.push({
         sheetName: sName,
@@ -1167,11 +1162,20 @@ function createFoldersAndSyncBatch(payload) {
         status: "เสร็จสิ้น ✅",
       });
     }
+
+    // 7. เขียน Smart Chip + Note + เปลี่ยนสถานะลงชีตแบบ Batch รวดเดียว
+    writeSmartChipsBatchToSheet(ssId, sheet, sheetUpdates);
+
+    // 8. ล้าง Cache ของแผ่นงานนี้เพื่อให้ข้อมูลใหม่พร้อมใช้งาน
+    try {
+      const cKey = "FAST_TASKS_V2_" + Utilities.base64EncodeWebSafe(sName).slice(0, 50);
+      scriptCache.remove(cKey);
+    } catch (e) {}
   }
 
   return {
     success: true,
-    message: `สร้างโฟลเดอร์ TH & INTER และอัปเดตชีตสำเร็จ ${results.length} รายการ`,
+    message: `สร้างโฟลเดอร์ TH & INTER และวาง Smart Chip สำเร็จ ${results.length} รายการ`,
     updatedTasks: results,
   };
 }
