@@ -2291,6 +2291,123 @@ function repairMissingThLinks(sheetName) {
   };
 }
 
+/**
+ * ฟังก์ชันสร้างโฟลเดอร์วันที่และ 9 หมวดหมู่หลักล่วงหน้าทั้งเดือน (TH & INTER)
+ * เพื่อป้องกันพนักงานคนอื่นสร้างโฟลเดอร์ผิดฟอร์แมต หรือสร้างโฟลเดอร์ซ้ำซ้อน
+ */
+function precreateFoldersBatch(payload) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sName = payload.sheetName || "";
+  const sheet = ss.getSheetByName(sName);
+  if (!sheet) {
+    throw new Error(`ไม่พบแผ่นงาน: ${sName}`);
+  }
+
+  // 1. ดึง Root Folders จากแถวที่ 3 (TH Col F, INTER Col G)
+  const { thFolder, interFolder } = getMonthlyRootFolders(sheet);
+  if (!thFolder) {
+    throw new Error("ไม่พบโฟลเดอร์หลัก TH ในแถวที่ 3 (Col F)");
+  }
+
+  // 2. ตรวจสอบชื่อเดือนจากแผ่นงาน
+  const baseDateInfo = parseDateFormats(sName);
+  const monthStr = baseDateInfo.thMonth; // เช่น "พ.ย."
+  const days = payload.days || [];
+  if (!Array.isArray(days) || days.length === 0) {
+    throw new Error("ไม่มีวันที่ที่ระบุ");
+  }
+
+  // หมวดหมู่ที่อนุญาตให้สร้างล่วงหน้า (ค่าเริ่มต้น 9 หมวดหลัก ยกเว้น แคมเปญ และ กิจกรรมกลาง)
+  const DEFAULT_9_CATEGORIES = [
+    "สล็อต",
+    "คาสิโน",
+    "บอล",
+    "มวย",
+    "ไก่ชน",
+    "วัวชน",
+    "กีฬาอื่นๆ",
+    "หวย APB",
+    "UFA NEWS",
+  ];
+  const targetCategories = (Array.isArray(payload.categories) && payload.categories.length > 0)
+    ? payload.categories
+    : DEFAULT_9_CATEGORIES;
+
+  const createdSummary = [];
+
+  for (let d = 0; d < days.length; d++) {
+    const day = days[d];
+    const dayDateInfo = parseDateFormats(`${day} ${monthStr}`);
+
+    // ก. สร้าง/ดึงโฟลเดอร์วันที่ฝั่ง TH
+    const thDateAliases = [
+      `${day} ${monthStr}`,
+      `${dayDateInfo.dayNumber} ${dayDateInfo.thMonth} ${dayDateInfo.thYear}`,
+      `${dayDateInfo.padDay} ${dayDateInfo.thMonth} ${dayDateInfo.thYear}`,
+      `${dayDateInfo.dayNumber} ${monthStr} ${dayDateInfo.thYear}`,
+      `${dayDateInfo.padDay} ${monthStr} ${dayDateInfo.thYear}`,
+      `${dayDateInfo.dayNumber} พย 69`,
+      `${dayDateInfo.padDay} พย 69`,
+    ];
+    const thDateFolder = getOrCreateFolderSmart(thFolder, dayDateInfo.thFolderName, thDateAliases, {
+      isDate: true,
+      dayNumber: dayDateInfo.dayNumber,
+      monthKeywords: [dayDateInfo.thMonth, monthStr, dayDateInfo.padMonth]
+    });
+
+    // ข. สร้าง/ดึงโฟลเดอร์วันที่ฝั่ง INTER
+    let interDateFolder = null;
+    if (interFolder) {
+      const interAliases = [
+        `${dayDateInfo.interMonth} ${dayDateInfo.dayNumber},${dayDateInfo.engYear}`,
+        `${dayDateInfo.interMonth} ${dayDateInfo.padDay},${dayDateInfo.engYear}`,
+        `${dayDateInfo.padDay} ${dayDateInfo.interMonth} ${dayDateInfo.engYear}`,
+        `${dayDateInfo.dayNumber} ${dayDateInfo.interMonth} ${dayDateInfo.engYear}`
+      ];
+      interDateFolder = getOrCreateFolderSmart(interFolder, dayDateInfo.interFolderName, interAliases, {
+        isDate: true,
+        dayNumber: dayDateInfo.dayNumber,
+        monthKeywords: [dayDateInfo.interMonth, dayDateInfo.padMonth]
+      });
+    }
+
+    // ค. สร้าง 9 หมวดหมู่หลักภายใต้โฟลเดอร์วันที่
+    for (let c = 0; c < targetCategories.length; c++) {
+      const catKey = targetCategories[c];
+      const catInfo = getCategoryInfoSmart(catKey);
+
+      if (thDateFolder) {
+        getOrCreateFolderSmart(thDateFolder, catInfo.thTarget, [catKey, catInfo.interTarget], {
+          isCategory: true,
+          keywords: catInfo.keywords
+        });
+      }
+
+      if (interDateFolder) {
+        getOrCreateFolderSmart(interDateFolder, catInfo.interTarget, [catInfo.thTarget, catKey], {
+          isCategory: true,
+          keywords: catInfo.keywords
+        });
+      }
+    }
+
+    createdSummary.push({
+      day: day,
+      thFolder: dayDateInfo.thFolderName,
+      interFolder: dayDateInfo.interFolderName,
+      categoriesCount: targetCategories.length
+    });
+  }
+
+  return {
+    success: true,
+    message: `สร้างโครงสร้างโฟลเดอร์วันที่ (${days.join(", ")}) พร้อม ${targetCategories.length} หมวดหมู่เรียบร้อยแล้ว`,
+    processedDays: days,
+    count: createdSummary.length,
+    summary: createdSummary
+  };
+}
+
 function doPost(e) {
   try {
     const postData = JSON.parse(e.postData.contents);
@@ -2299,6 +2416,8 @@ function doPost(e) {
     let data;
     if (action === "createFolders") {
       data = createFoldersAndSyncBatch(postData);
+    } else if (action === "precreateFoldersBatch") {
+      data = precreateFoldersBatch(postData);
     } else if (action === "fixSmartChips") {
       data = convertSheetLinksToSmartChips(postData.sheetName, postData.rows);
     } else if (action === "repairLinks") {

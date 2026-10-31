@@ -136,6 +136,18 @@ export default function HomePage() {
   // การยกเลิกสร้างโฟลเดอร์
   const syncAbortControllerRef = useRef<AbortController | null>(null);
 
+  // สร้างโฟลเดอร์ล่วงหน้า (Pre-create Date & 9 Categories)
+  const [showPrecreateModal, setShowPrecreateModal] = useState<boolean>(false);
+  const [precreateSheet, setPrecreateSheet] = useState<string>("");
+  const [precreateStartDay, setPrecreateStartDay] = useState<number>(1);
+  const [precreateEndDay, setPrecreateEndDay] = useState<number>(30);
+  const [isPrecreating, setIsPrecreating] = useState<boolean>(false);
+  const [precreateProgress, setPrecreateProgress] = useState<number>(0);
+  const [precreateStatusText, setPrecreateStatusText] = useState<string>("");
+  const [precreateError, setPrecreateError] = useState<string | null>(null);
+  const [precreateSuccess, setPrecreateSuccess] = useState<boolean>(false);
+  const precreateAbortControllerRef = useRef<AbortController | null>(null);
+
   // ดักจับปุ่ม Esc เพื่อกดยกเลิกขณะกำลังสร้างโฟลเดอร์ทันที
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -657,6 +669,100 @@ export default function HomePage() {
     setSyncingTaskKeys([]);
   };
 
+  const handleCancelPrecreate = () => {
+    if (precreateAbortControllerRef.current) {
+      precreateAbortControllerRef.current.abort();
+      precreateAbortControllerRef.current = null;
+    }
+    setIsPrecreating(false);
+    setPrecreateStatusText("ยกเลิกการสร้างโฟลเดอร์ล่วงหน้าแล้ว");
+  };
+
+  const handleStartPrecreate = async () => {
+    const sheetToUse = precreateSheet || availableSheets[0] || selectedSheets[0];
+    if (!sheetToUse) {
+      alert("กรุณาเลือกเดือน/แผ่นงานที่ต้องการสร้าง");
+      return;
+    }
+
+    const start = Math.max(1, Math.min(precreateStartDay, precreateEndDay));
+    const end = Math.min(31, Math.max(precreateStartDay, precreateEndDay));
+    const allDays: number[] = [];
+    for (let d = start; d <= end; d++) {
+      allDays.push(d);
+    }
+
+    if (allDays.length === 0) {
+      alert("กรุณาระบุช่วงวันที่ให้ถูกต้อง");
+      return;
+    }
+
+    // แบ่งเป็นชุดละ 5 วันเพื่อความรวดเร็วและป้องกัน Timeout
+    const BATCH_SIZE = 5;
+    const batches: number[][] = [];
+    for (let i = 0; i < allDays.length; i += BATCH_SIZE) {
+      batches.push(allDays.slice(i, i + BATCH_SIZE));
+    }
+
+    setIsPrecreating(true);
+    setPrecreateProgress(0);
+    setPrecreateError(null);
+    setPrecreateSuccess(false);
+
+    const controller = new AbortController();
+    precreateAbortControllerRef.current = controller;
+
+    try {
+      for (let bIdx = 0; bIdx < batches.length; bIdx++) {
+        const batch = batches[bIdx];
+        const percent = Math.round((bIdx / batches.length) * 100);
+        setPrecreateProgress(percent);
+        setPrecreateStatusText(
+          `กำลังสร้างวันที่ ${batch[0]} - ${batch[batch.length - 1]} (TH & INTER พร้อม 9 หมวดหมู่)... (ชุดที่ ${bIdx + 1}/${batches.length})`
+        );
+
+        const res = await fetch("/api/precreate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sheetName: sheetToUse,
+            days: batch,
+            categories: [
+              "สล็อต",
+              "คาสิโน",
+              "บอล",
+              "มวย",
+              "ไก่ชน",
+              "วัวชน",
+              "กีฬาอื่นๆ",
+              "หวย APB",
+              "UFA NEWS",
+            ],
+          }),
+          signal: controller.signal,
+        });
+
+        const data = await res.json();
+        if (!data.success) {
+          throw new Error(data.message || data.error || "เกิดข้อผิดพลาดในการสร้างโฟลเดอร์ล่วงหน้า");
+        }
+      }
+
+      setPrecreateProgress(100);
+      setPrecreateSuccess(true);
+      setPrecreateStatusText(`สร้างโครงสร้างวันที่ ${start} - ${end} พร้อม 9 หมวดหมู่หลัก (TH & INTER) สำเร็จครบถ้วนแล้ว!`);
+    } catch (err: any) {
+      if (err.name === "AbortError") {
+        setPrecreateStatusText("ยกเลิกการสร้างโฟลเดอร์ล่วงหน้าแล้ว");
+        return;
+      }
+      setPrecreateError(err.message || "เกิดข้อผิดพลาดในการเชื่อมต่อ");
+    } finally {
+      setIsPrecreating(false);
+      precreateAbortControllerRef.current = null;
+    }
+  };
+
   // ดำเนินการสร้างโฟลเดอร์ทันที (ไม่มีการนับถอยหลัง)
   const handleSyncFolders = async () => {
     if (selectedTaskKeys.length === 0) {
@@ -893,6 +999,20 @@ const renderDateCheckbox = (s: string) => {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                setShowPrecreateModal(true);
+                setPrecreateError(null);
+                setPrecreateSuccess(false);
+                setPrecreateStatusText("");
+                setPrecreateProgress(0);
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-[#8C3A27] bg-[#FAF0ED] hover:bg-[#F5DFD8] border border-[#EED0C8] rounded-xl transition-all cursor-pointer shadow-2xs active:scale-95"
+              title="สร้างโฟลเดอร์วันที่และ 9 หมวดหมู่หลักล่วงหน้าทั้งเดือน (TH & INTER)"
+            >
+              <FolderPlus className="w-3.5 h-3.5 text-[#8C3A27]" />
+              <span>สร้างโฟลเดอร์ล่วงหน้า</span>
+            </button>
             <a
               href="https://docs.google.com/spreadsheets/d/1WIm3CzQ708nHcdIFQBnQEDBHWjBGeOCQL_MEAO2rBD8/edit"
               target="_blank"
@@ -1783,6 +1903,206 @@ const renderDateCheckbox = (s: string) => {
           </div>
         )}
       </aside>
+
+      {/* Modal: สร้างโฟลเดอร์ล่วงหน้า (Precreate Date & 9 Categories) */}
+      {showPrecreateModal && (
+        <div className="fixed inset-0 bg-[#2D2A26]/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-[#FDFBF7] rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-[#E6E1D7] max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-[#EFEBE4] pb-4">
+              <h3 className="text-base sm:text-lg font-bold text-[#2D2A26] flex items-center gap-2">
+                <FolderPlus className="w-5 h-5 text-[#8C3A27]" />
+                <span>สร้างโฟลเดอร์ล่วงหน้า (TH & INTER)</span>
+              </h3>
+              <button
+                onClick={() => {
+                  if (isPrecreating) handleCancelPrecreate();
+                  setShowPrecreateModal(false);
+                }}
+                className="text-[#A8A196] hover:text-[#2D2A26] text-sm font-bold px-2 py-1 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="py-4 space-y-4 text-xs sm:text-sm text-[#5E513F]">
+              <p className="text-xs text-[#7A7368]">
+                ระบบจะสร้างโฟลเดอร์วันที่ตามมาตรฐาน พร้อมสร้างโฟลเดอร์ 9 หมวดหมู่หลักไว้ข้างในล่วงหน้า (หากวันไหนมีโฟลเดอร์เดิมอยู่แล้ว ระบบจะไม่สร้างซ้ำ แต่จะช่วยเติมหมวดหมู่ที่ยังขาดให้ครบ)
+              </p>
+
+              {/* เลือกแผ่นงาน/เดือนอ้างอิง */}
+              <div>
+                <label className="block text-xs font-bold text-[#2D2A26] mb-1.5">
+                  เลือกเดือน / แผ่นงานอ้างอิง (เพื่อดึงโฟลเดอร์หลัก TH & INTER จากแถว 3):
+                </label>
+                <select
+                  value={precreateSheet || availableSheets[0] || ""}
+                  onChange={(e) => setPrecreateSheet(e.target.value)}
+                  disabled={isPrecreating}
+                  className="w-full px-3 py-2 text-xs font-semibold bg-white border border-[#DED4C3] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#8C3A27]/20 focus:border-[#8C3A27]"
+                >
+                  {availableSheets.map((s) => (
+                    <option key={s} value={s}>
+                      แผ่นงาน: {s}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* เลือกช่วงวันที่ */}
+              <div>
+                <label className="block text-xs font-bold text-[#2D2A26] mb-1.5">
+                  เลือกช่วงวันที่ต้องการสร้าง:
+                </label>
+                <div className="flex items-center gap-2 mb-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => { setPrecreateStartDay(1); setPrecreateEndDay(30); }}
+                    disabled={isPrecreating}
+                    className="px-2.5 py-1 text-xs font-bold rounded-lg border border-[#DED4C3] bg-[#F5EFE6] hover:bg-[#EAE3D6] text-[#5E513F] active:scale-95 transition-all cursor-pointer"
+                  >
+                    วันที่ 1 - 30 (ทั้งเดือน)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setPrecreateStartDay(1); setPrecreateEndDay(15); }}
+                    disabled={isPrecreating}
+                    className="px-2.5 py-1 text-xs font-bold rounded-lg border border-[#DED4C3] bg-[#F5EFE6] hover:bg-[#EAE3D6] text-[#5E513F] active:scale-95 transition-all cursor-pointer"
+                  >
+                    วันที่ 1 - 15 (ครึ่งแรก)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setPrecreateStartDay(16); setPrecreateEndDay(30); }}
+                    disabled={isPrecreating}
+                    className="px-2.5 py-1 text-xs font-bold rounded-lg border border-[#DED4C3] bg-[#F5EFE6] hover:bg-[#EAE3D6] text-[#5E513F] active:scale-95 transition-all cursor-pointer"
+                  >
+                    วันที่ 16 - 30 (ครึ่งหลัง)
+                  </button>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="flex-1">
+                    <span className="text-[11px] text-[#7A7368] font-medium">ตั้งแต่วันที่:</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={31}
+                      value={precreateStartDay}
+                      onChange={(e) => setPrecreateStartDay(parseInt(e.target.value, 10) || 1)}
+                      disabled={isPrecreating}
+                      className="w-full px-3 py-1.5 text-xs font-bold bg-white border border-[#DED4C3] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#8C3A27]/20"
+                    />
+                  </div>
+                  <span className="text-xs font-bold text-[#A8A196] mt-4">ถึง</span>
+                  <div className="flex-1">
+                    <span className="text-[11px] text-[#7A7368] font-medium">ถึงวันที่:</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={31}
+                      value={precreateEndDay}
+                      onChange={(e) => setPrecreateEndDay(parseInt(e.target.value, 10) || 30)}
+                      disabled={isPrecreating}
+                      className="w-full px-3 py-1.5 text-xs font-bold bg-white border border-[#DED4C3] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#8C3A27]/20"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* แสดง 9 หมวดหมู่หลักที่จะถูกสร้าง */}
+              <div>
+                <label className="block text-xs font-bold text-[#2D2A26] mb-1.5">
+                  9 หมวดหมู่หลักที่จะสร้างไว้ล่วงหน้า:
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    "สล็อต SLOT",
+                    "คาสิโน CASINO",
+                    "บอล FOOTBALL",
+                    "มวย BOXING",
+                    "ไก่ชน COCK FIGHTING",
+                    "วัวชน COW FIGHTING",
+                    "กีฬาอื่นๆ Other Sports",
+                    "หวย APB",
+                    "UFA NEWS",
+                  ].map((cat) => (
+                    <span
+                      key={cat}
+                      className="px-2 py-0.5 rounded-lg text-xs font-medium bg-[#EFF5F0] text-[#34603B] border border-[#D1E4D4]"
+                    >
+                      {cat}
+                    </span>
+                  ))}
+                </div>
+                <p className="text-[11px] text-[#8C6228] mt-1.5 italic">
+                  * จะไม่สร้างหมวดหมู่ &quot;แคมเปญ&quot; และ &quot;กิจกรรมกลาง&quot; ล่วงหน้าตามที่กำหนดไว้
+                </p>
+              </div>
+
+              {/* แถบแสดงความคืบหน้า (Progress Bar) */}
+              {(isPrecreating || precreateSuccess || precreateError) && (
+                <div className="p-3.5 bg-white border border-[#E6E1D7] rounded-2xl space-y-2">
+                  <div className="flex items-center justify-between text-xs font-bold">
+                    <span className={precreateError ? "text-[#9E4534]" : precreateSuccess ? "text-[#34603B]" : "text-[#8C3A27]"}>
+                      {precreateStatusText || (isPrecreating ? "กำลังดำเนินการ..." : "")}
+                    </span>
+                    <span className="font-mono text-[#7A7368]">{precreateProgress}%</span>
+                  </div>
+                  <div className="w-full bg-[#F0ECE4] h-2.5 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full transition-all duration-300 rounded-full ${
+                        precreateError
+                          ? "bg-[#9E4534]"
+                          : precreateSuccess
+                          ? "bg-[#34603B]"
+                          : "bg-[#8C3A27]"
+                      }`}
+                      style={{ width: `${precreateProgress}%` }}
+                    />
+                  </div>
+                  {precreateError && (
+                    <p className="text-xs text-[#9E4534] font-medium">{precreateError}</p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* ปุ่มกดล่าง Modal */}
+            <div className="border-t border-[#EFEBE4] pt-4 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (isPrecreating) handleCancelPrecreate();
+                  setShowPrecreateModal(false);
+                }}
+                disabled={isPrecreating}
+                className="px-4 py-2 text-xs font-bold text-[#5E513F] bg-[#F5EFE6] hover:bg-[#EAE3D6] rounded-xl border border-[#DED4C3] transition-colors cursor-pointer disabled:opacity-50"
+              >
+                ปิดหน้าต่าง
+              </button>
+
+              {isPrecreating ? (
+                <button
+                  type="button"
+                  onClick={handleCancelPrecreate}
+                  className="px-4 py-2 text-xs font-bold text-[#8C3A27] bg-[#FAF0ED] hover:bg-[#F5DFD8] border border-[#EED0C8] rounded-xl transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-2xs"
+                >
+                  <X className="w-4 h-4 text-[#8C3A27]" />
+                  <span>ยกเลิกการสร้าง</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleStartPrecreate}
+                  className="px-5 py-2 text-xs font-bold text-white bg-[#8C3A27] hover:bg-[#783020] active:scale-95 rounded-xl transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-sm shadow-[#8C3A27]/20"
+                >
+                  <Sparkles className="w-4 h-4 text-[#F5C4B8]" />
+                  <span>เริ่มสร้างโฟลเดอร์ล่วงหน้า</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Guide Modal */}
       {showGuide && (
