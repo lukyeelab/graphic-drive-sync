@@ -208,6 +208,32 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // กรณีค้นหาแผ่นงานที่มีงานของพนักงานคนนั้น (action=getMatchingSheets)
+    if (action === "getMatchingSheets") {
+      const targetUrl = new URL(gasUrl);
+      targetUrl.searchParams.set("action", "getMatchingSheets");
+      targetUrl.searchParams.set("assignee", assignee);
+      targetUrl.searchParams.set("sheet", sheet);
+
+      const res = await fetch(targetUrl.toString(), {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        redirect: "follow",
+        cache: "no-store",
+      });
+
+      const responseText = await res.text();
+      try {
+        const data = JSON.parse(responseText);
+        return NextResponse.json(data);
+      } catch {
+        return NextResponse.json(
+          { success: false, error: "Google Apps Script ตอบกลับไม่ใช่ JSON: " + responseText.slice(0, 200) },
+          { status: 502 }
+        );
+      }
+    }
+
     // กรณีดึงรายการงาน (action=getTasks)
     const isForce = searchParams.get("force") === "true";
     if (isForce) {

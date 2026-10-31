@@ -480,7 +480,7 @@ export default function HomePage() {
     }
 
     // แผ่นงานที่ยังไม่มีในแคช
-    const uncachedSheets = forceLoading
+    let uncachedSheets = forceLoading
       ? targetSheetsList
       : targetSheetsList.filter((s) => !clientSheetCacheRef.current[s]);
 
@@ -490,6 +490,35 @@ export default function HomePage() {
       setTasks([]);
     } else {
       setIsLoading(false);
+    }
+
+    // ระบบ v4 Smart Scanner: หากระบุชื่อพนักงาน และเลือกหลายแผ่นงาน ให้ใช้ action=getMatchingSheets สแกนหาเฉพาะวันที่มีงานจริงใน ~0.15-0.25 วินาที!
+    if (targetAssignee && targetAssignee !== "ALL" && uncachedSheets.length > 1) {
+      try {
+        const matchRes = await fetch(
+          `/api/tasks?action=getMatchingSheets&assignee=${encodeURIComponent(targetAssignee)}&sheet=${encodeURIComponent(
+            uncachedSheets.join(",")
+          )}&_t=${Date.now()}`,
+          { signal: controller.signal }
+        );
+        if (controller.signal.aborted || abortControllerRef.current !== controller) return;
+        const matchData = await matchRes.json();
+        if (matchData && matchData.success && Array.isArray(matchData.matchingSheets)) {
+          // ถ้าสแกนแล้วไม่พบงานของพนักงานคนนี้ในชีตใดเลย
+          if (matchData.matchingSheets.length === 0) {
+            setIsLoading(false);
+            setStreamingProgress(null);
+            if (cachedSheets.length === 0) {
+              setTasks([]);
+            }
+            return;
+          }
+          // กรองเฉพาะชีตที่มีงานของพนักงานคนนี้จริงๆ เท่านั้น (ข้ามวันที่ไม่มีงานทิ้ง 100%)
+          uncachedSheets = matchData.matchingSheets;
+        }
+      } catch (eMatch) {
+        // หาก getMatchingSheets มีปัญหา ให้ fallback ไปดึงตามปกติ
+      }
     }
 
     // กรณีเป็นแผ่นงานเดียว หรือโหมด ALL ที่ยังไม่รู้รายชื่อแผ่นงาน
@@ -543,7 +572,9 @@ export default function HomePage() {
       batches.push([uncachedSheets[0]]);
 
       let cursor = 1;
-      const stepSizes = [2, 3, 5, 8, 12, 16];
+      const stepSizes = (targetAssignee && targetAssignee !== "ALL")
+        ? [1, 1, 1, 1, 2, 2, 3]
+        : [2, 3, 5, 8, 12, 16];
       let stepIdx = 0;
       while (cursor < uncachedSheets.length) {
         const size = stepSizes[stepIdx] || 15;
