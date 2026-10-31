@@ -225,7 +225,7 @@ function extractCellLinkAndTitle(val, richText, formula) {
 }
 
 /**
- * ค้นหา URL ของไฟล์หรือโฟลเดอร์ใบบรีฟใน Google Drive ตามชื่อ (เน้น Google Slides Presentation)
+ * ค้นหา URL ของไฟล์ใบบรีฟใน Google Drive ตามชื่อ (เน้นบังคับคืนค่าเป็นลิงก์ Google Slides Presentation)
  */
 function findDriveFileOrFolderUrl(title) {
   if (!title || typeof title !== "string") return "";
@@ -234,7 +234,18 @@ function findDriveFileOrFolderUrl(title) {
 
   const singleSpaced = cleanTitle.replace(/\s+/g, " ");
 
-  // 1. ค้นหา Google Slides (Presentation) โดยตรง (เพราะใบบรีฟส่วนใหญ่เป็น Google Slides Presentation)
+  // 1. ค้นหา Google Slides (Presentation) แบบชื่อตรงหรือใกล้เคียงก่อนเสมอ
+  try {
+    const safeFull = singleSpaced.replace(/['"\\]/g, "");
+    const qFull = `title contains '${safeFull.slice(0, 30)}' and mimeType = 'application/vnd.google-apps.presentation' and trashed = false`;
+    const slidesFull = DriveApp.searchFiles(qFull);
+    if (slidesFull.hasNext()) {
+      const slide = slidesFull.next();
+      return `https://docs.google.com/presentation/d/${slide.getId()}/edit`;
+    }
+  } catch (e) {}
+
+  // 2. ค้นหา Google Slides จากคีย์เวิร์ดส่วนแรก (กรณีย่อชื่อหรือมีเครื่องหมายขีดคั่น)
   try {
     const segments = singleSpaced.split(/[-–—]/);
     const mainKey = (segments[0] || singleSpaced).trim().replace(/['"\\]/g, "");
@@ -244,56 +255,75 @@ function findDriveFileOrFolderUrl(title) {
       const slides = DriveApp.searchFiles(q);
       if (slides.hasNext()) {
         const slide = slides.next();
-        return slide.getUrl(); // คืนค่าเป็น https://docs.google.com/presentation/d/.../edit
+        return `https://docs.google.com/presentation/d/${slide.getId()}/edit`;
       }
     }
   } catch (e) {
     Logger.log("Slides search error: " + e.message);
   }
 
-  // 2. ลองค้นหาไฟล์ตรงตามชื่อ (ทุก MimeType)
+  // 3. ลองค้นหาไฟล์ตรงตามชื่อ (ถ้าเป็น Presentation ให้แปลงเป็นลิงก์ presentation ทันที)
   try {
     const files = DriveApp.getFilesByName(singleSpaced);
     while (files.hasNext()) {
       const f = files.next();
       if (!f.isTrashed()) {
+        if (f.getMimeType() === "application/vnd.google-apps.presentation") {
+          return `https://docs.google.com/presentation/d/${f.getId()}/edit`;
+        }
         return f.getUrl();
-      }
-    }
-  } catch (e) {}
-
-  try {
-    const files = DriveApp.getFilesByName(cleanTitle);
-    while (files.hasNext()) {
-      const f = files.next();
-      if (!f.isTrashed()) {
-        return f.getUrl();
-      }
-    }
-  } catch (e) {}
-
-  // 3. ค้นหาแบบ title contains ทั่วไป
-  try {
-    const safeTitle = singleSpaced.replace(/['"\\]/g, "");
-    const qGeneral = `title contains '${safeTitle.slice(0, 25)}' and trashed = false`;
-    const iter = DriveApp.searchFiles(qGeneral);
-    if (iter.hasNext()) {
-      return iter.next().getUrl();
-    }
-  } catch (e) {}
-
-  // 4. ลองค้นหาเป็นโฟลเดอร์ใน Drive
-  try {
-    const folders = DriveApp.getFoldersByName(cleanTitle);
-    while (folders.hasNext()) {
-      const folder = folders.next();
-      if (!folder.isTrashed()) {
-        return folder.getUrl();
       }
     }
   } catch (e) {}
 
   return "";
+}
+
+/**
+ * แปลงลิงก์จาก Google Drive ทั่วไป หรือ Smart Chip ให้เป็นลิงก์เปิดหน้า Google Slides Presentation โดยตรง
+ */
+function normalizeToPresentationUrl(rawUrl, briefTitle, scriptCache, memoryBriefCache) {
+  let url = (rawUrl || "").toString().trim();
+
+  // 1. ถ้าเป็นลิงก์ Google Slides อยู่แล้ว คืนค่าเดิมทันที
+  if (url.includes("docs.google.com/presentation/d/")) {
+    return url;
+  }
+
+  // 2. ถ้าเป็นลิงก์ไฟล์ใน Google Drive (เช่น drive.google.com/file/d/ID หรือ drive.google.com/open?id=ID)
+  // และไม่ใช่ลิงก์โฟลเดอร์ (/folders/) ให้ดึง ID มาแปลงเป็นลิงก์ Presentation ทันที (ไม่ต้องยิง API ค้นหา)
+  if (url && !url.includes("/folders/")) {
+    const dMatch = url.match(/\/d\/([-\w]{25,})/i);
+    const idMatch = url.match(/[?&]id=([-\w]{25,})/i);
+    const fileId = (dMatch && dMatch[1]) || (idMatch && idMatch[1]);
+    if (fileId) {
+      return `https://docs.google.com/presentation/d/${fileId}/edit`;
+    }
+  }
+
+  // 3. ถ้าไม่มีลิงก์ หรือลิงก์ในช่องเผลอเป็นลิงก์โฟลเดอร์ (/folders/) ให้ค้นหาไฟล์ Google Slides จากชื่อใบบรีฟแทน (ผ่าน Cache)
+  if (briefTitle) {
+    const cacheKey = "SLIDE_URL_V2_" + Utilities.base64EncodeWebSafe(briefTitle).slice(0, 60);
+    if (memoryBriefCache && memoryBriefCache[briefTitle] !== undefined) {
+      return memoryBriefCache[briefTitle] || url;
+    }
+    const cachedUrl = scriptCache ? scriptCache.get(cacheKey) : null;
+    if (cachedUrl !== null && cachedUrl !== "") {
+      if (memoryBriefCache) memoryBriefCache[briefTitle] = cachedUrl;
+      return cachedUrl;
+    }
+    const foundSlideUrl = findDriveFileOrFolderUrl(briefTitle);
+    const finalUrl = foundSlideUrl || url;
+    if (memoryBriefCache) memoryBriefCache[briefTitle] = finalUrl;
+    try {
+      if (finalUrl && scriptCache) {
+        scriptCache.put(cacheKey, finalUrl, 21600); // แคชไว้นาน 6 ชั่วโมง
+      }
+    } catch (e) {}
+    return finalUrl;
+  }
+
+  return url;
 }
 
 /**
@@ -629,10 +659,10 @@ function fetchSheetsGridDataFast(spreadsheetId, sheetNames) {
   try {
     const token = ScriptApp.getOAuthToken();
     const rangesParam = sheetNames
-      .map(name => `ranges=${encodeURIComponent(`'${name}'!A1:N600`)}`)
+      .map(name => `ranges=${encodeURIComponent(`'${name}'!A1:N120`)}`)
       .join("&");
     const fields = "sheets(properties(title),data(rowData(values(formattedValue,hyperlink,note,textFormatRuns(format(link(uri))),chipRuns(chip(richLinkProperties(uri)))))))";
-    const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?${rangesParam}&fields=${encodeURIComponent(fields)}`;
+    const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?${rangesParam}&fields=${encodeURI(fields)}`;
 
     const res = UrlFetchApp.fetch(apiUrl, {
       method: "get",
@@ -649,6 +679,32 @@ function fetchSheetsGridDataFast(spreadsheetId, sheetNames) {
     Logger.log("fetchSheetsGridDataFast exception: " + e.message);
     return null;
   }
+}
+
+/**
+ * เรียงลำดับชื่อแผ่นงานวันที่จากล่าสุดไปหาเก่าสุด
+ */
+function sortSheetNamesDesc(sheets) {
+  const monthWeights = {
+    "ธค": 12, "ธ.ค.": 12, "พย": 11, "พ.ย.": 11, "ตค": 10, "ต.ค.": 10,
+    "กย": 9, "ก.ย.": 9, "สค": 8, "ส.ค.": 8, "กค": 7, "ก.ค.": 7,
+    "มิย": 6, "มิ.ย.": 6, "พค": 5, "พ.ค.": 5, "เมย": 4, "เม.ย.": 4,
+    "มีค": 3, "มี.ค.": 3, "กพ": 2, "ก.พ.": 2, "มค": 1, "ม.ค.": 1
+  };
+  return [...sheets].sort((a, b) => {
+    const parse = (str) => {
+      const match = str.trim().match(/^(\d+)\s*([^\d\s]+)?/);
+      if (!match) return { day: 0, mWeight: 0 };
+      const day = parseInt(match[1], 10);
+      const mStr = (match[2] || "").trim();
+      const mWeight = monthWeights[mStr] || 0;
+      return { day, mWeight };
+    };
+    const pA = parse(a);
+    const pB = parse(b);
+    if (pA.mWeight !== pB.mWeight) return pB.mWeight - pA.mWeight;
+    return pB.day - pA.day;
+  });
 }
 
 /**
@@ -711,8 +767,9 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
       return { success: false, error: `ไม่พบแผ่นงานชื่อ: ${targetSheet}` };
     }
   } else {
-    // กรณี ALL ค้นหาเฉพาะ 8 แผ่นงานแรกของเดือนปัจจุบันเพื่อความรวดเร็ว
-    targetSheetNames = allSheetNames.slice(0, 8);
+    // กรณี ALL เรียงลำดับแท็บวันที่ล่าสุดก่อน แล้วดึง 6 วันล่าสุด
+    const sortedSheets = sortSheetNamesDesc(allSheetNames);
+    targetSheetNames = sortedSheets.slice(0, 6);
   }
 
   const tasks = [];
@@ -788,26 +845,13 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
           continue;
         }
 
-        // 4. ดึงลิงก์ใบบรีฟ (ถ้าเป็น Smart Chip จะได้จาก currentBriefLink ทันที แต่ถ้าเป็นข้อความธรรมดาจะดึงจาก CacheService)
-        let taskBriefLink = currentBriefLink;
-        if (!taskBriefLink && currentBriefTitle) {
-          const cacheKey = "BRIEF_URL_" + Utilities.base64EncodeWebSafe(currentBriefTitle).slice(0, 60);
-          if (memoryBriefCache[currentBriefTitle] !== undefined) {
-            taskBriefLink = memoryBriefCache[currentBriefTitle];
-          } else {
-            const cachedUrl = scriptCache.get(cacheKey);
-            if (cachedUrl !== null) {
-              taskBriefLink = cachedUrl;
-              memoryBriefCache[currentBriefTitle] = cachedUrl;
-            } else {
-              taskBriefLink = findDriveFileOrFolderUrl(currentBriefTitle);
-              memoryBriefCache[currentBriefTitle] = taskBriefLink;
-              try {
-                scriptCache.put(cacheKey, taskBriefLink || "", 21600); // แคชไว้นาน 6 ชั่วโมง
-              } catch (e) {}
-            }
-          }
-        }
+        // 4. แปลงลิงก์ใบบรีฟ Col D ให้เป็น https://docs.google.com/presentation/d/.../edit เสมอ
+        const taskBriefLink = normalizeToPresentationUrl(
+          currentBriefLink,
+          currentBriefTitle,
+          scriptCache,
+          memoryBriefCache
+        );
 
         const team = (vals[CONFIG.COL_TEAM - 1]?.formattedValue || "").toString().trim();
         const assignDate = vals[CONFIG.COL_ASSIGN_DATE - 1]?.formattedValue || "";
@@ -838,14 +882,15 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
       const sName = targetSheetNames[sIdx];
       const sheet = ss.getSheetByName(sName);
       if (!sheet) continue;
-      const lastRow = sheet.getLastRow();
+      const lastRow = Math.min(sheet.getLastRow(), 120);
       if (lastRow < CONFIG.DATA_START_ROW) continue;
 
       const range = sheet.getRange(1, 1, lastRow, 14);
       const values = range.getValues();
-      const richTexts = range.getRichTextValues();
       const formulas = range.getFormulas();
       const notes = range.getNotes();
+      const colDBriefRich = sheet.getRange(1, CONFIG.COL_BRIEF_LINK, lastRow, 1).getRichTextValues();
+      const colFUploadRich = sheet.getRange(1, CONFIG.COL_UPLOAD_LINK, lastRow, 1).getRichTextValues();
 
       let currentCategory = "";
       let currentBriefLink = "";
@@ -861,7 +906,7 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
         }
 
         const briefVal = values[rowIdx][CONFIG.COL_BRIEF_LINK - 1];
-        const briefRich = richTexts[rowIdx][CONFIG.COL_BRIEF_LINK - 1];
+        const briefRich = colDBriefRich[rowIdx][0];
         const briefFormula = formulas[rowIdx][CONFIG.COL_BRIEF_LINK - 1];
         const extractedBrief = extractCellLinkAndTitle(briefVal, briefRich, briefFormula);
 
@@ -879,7 +924,7 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
           if (!rowAssignee && !noVal && !uploadCellText) continue;
         }
 
-        const uploadRich = richTexts[rowIdx][CONFIG.COL_UPLOAD_LINK - 1];
+        const uploadRich = colFUploadRich[rowIdx][0];
         const uploadFormula = formulas[rowIdx][CONFIG.COL_UPLOAD_LINK - 1];
         const extractedUpload = extractCellLinkAndTitle(uploadCellText, uploadRich, uploadFormula);
         const uploadUrl = extractedUpload.link;
@@ -894,10 +939,12 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
         const isCompleted = status.includes("เสร็จสิ้น") || (uploadUrl !== "" && uploadCellText !== "");
         if (pendingOnly && isCompleted) continue;
 
-        let taskBriefLink = currentBriefLink;
-        if (!taskBriefLink && currentBriefTitle) {
-          taskBriefLink = findDriveFileOrFolderUrl(currentBriefTitle);
-        }
+        const taskBriefLink = normalizeToPresentationUrl(
+          currentBriefLink,
+          currentBriefTitle,
+          scriptCache,
+          memoryBriefCache
+        );
 
         const team = values[rowIdx][CONFIG.COL_TEAM - 1]?.toString().trim() || "";
         const assignDate = values[rowIdx][CONFIG.COL_ASSIGN_DATE - 1];
