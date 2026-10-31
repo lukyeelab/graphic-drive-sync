@@ -947,11 +947,15 @@ function getSheetSmartChipsMap(spreadsheetId, sheetName, lastRow) {
 function isInterMonthlyFolderName(name) {
   if (!name || typeof name !== "string") return false;
   const n = name.toUpperCase().trim();
+  // หากมีคำว่า "ใบขาย", "เดือน" หรือขึ้นต้นด้วย "TH" หรือมีเดือนภาษาไทย ให้ถือเป็น TH แน่นอน
+  if (n.includes("ใบขาย") || n.includes("เดือน") || /^(TH\s|TH_)/i.test(n)) return false;
+  if (/(ม\.?ค\.?|ก\.?พ\.?|มี\.?ค\.?|เม\.?ย\.?|พ\.?ค\.?|มิ\.?ย\.?|ก\.?ค\.?|ส\.?ค\.?|ก\.?ย\.?|ต\.?ค\.?|พ\.?ย\.?|ธ\.?ค\.?)/.test(n) && !n.includes("INTER")) return false;
+
   if (n.includes("INTER")) return true;
-  if (/^M\d{1,2}$/i.test(n) || /^INTER\s*M\d{1,2}$/i.test(n)) return true; // M11, M12 คือ INTER ประจำเดือน!
-  if (/^\[\d{1,2}\]/.test(n)) return true;
-  if (/^(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+\d{4}/i.test(n)) return true;
-  if (/^\d{1,2}\s+(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+\d{4}/i.test(n)) return true;
+  if (/^M\d{1,2}$/i.test(n) || /^INTER\s*M\d{1,2}$/i.test(n)) return true; // เช่น M11, INTER M11
+  if (/^\[\d{1,2}\]/.test(n)) return true; // เช่น [11] NOV 2026, [11] NOV
+  if (/^\d{1,2}\s*[-/]?\s*(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)/i.test(n)) return true; // เช่น 11 NOV 2026
+  if (/^(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)/i.test(n)) return true; // เช่น NOV 2026
   return false;
 }
 
@@ -961,10 +965,11 @@ function isInterMonthlyFolderName(name) {
 function isThMonthlyFolderName(name) {
   if (!name || typeof name !== "string") return false;
   const n = name.toUpperCase().trim();
-  if (n.includes("เดือน")) return true; // "เดือน 11" คือ TH ประจำเดือน!
-  if (n.includes("ใบขาย")) return true;
-  if (n.includes("TH") && !n.includes("OTHER")) return true;
-  if (n.includes("พ.ย.") || n.includes("ธ.ค.") || n.includes("ต.ค.") || n.includes("ก.ย.") || n.includes("ส.ค.") || n.includes("ก.ค.") || n.includes("มิ.ย.") || n.includes("พ.ค.") || n.includes("เม.ย.") || n.includes("มี.ค.") || n.includes("ก.พ.") || n.includes("ม.ค.")) return true;
+  if (n.includes("INTER")) return false; // ถ้ามีคำว่า INTER ไม่ใช่ TH แน่นอน
+  if (n.includes("ใบขาย")) return true; // เช่น "TH ใบขาย พ.ย. NOV 69", "ใบขาย พ.ย. NOV 69"
+  if (n.includes("เดือน")) return true; // เช่น "เดือน 11", "TH เดือน 11"
+  if (/\bTH\b/i.test(n) || n.startsWith("TH ") || n.endsWith(" TH")) return true;
+  if (/(ม\.?ค\.?|ก\.?พ\.?|มี\.?ค\.?|เม\.?ย\.?|พ\.?ค\.?|มิ\.?ย\.?|ก\.?ค\.?|ส\.?ค\.?|ก\.?ย\.?|ต\.?ค\.?|พ\.?ย\.?|ธ\.?ค\.?)/.test(n)) return true;
   return false;
 }
 
@@ -1119,24 +1124,28 @@ function getMonthlyRootFolders(sheet) {
   // 2. Fallback: หากยังไม่พบ ให้ค้นหาจากชื่อโฟลเดอร์จริงตามเดือน
   const dateInfo = parseDateFormats(sheetName);
   const thDynamicNames = [
+    `TH ใบขาย ${dateInfo.thMonth} ${dateInfo.interMonth} ${dateInfo.thYear}`,
+    `ใบขาย ${dateInfo.thMonth} ${dateInfo.interMonth} ${dateInfo.thYear}`,
+    "TH ใบขาย พ.ย. NOV 69",
+    "ใบขาย พ.ย. NOV 69",
     `เดือน ${dateInfo.padMonth}`,
     `เดือน ${parseInt(dateInfo.padMonth, 10)}`,
     "เดือน 11",
-    `ใบขาย ${dateInfo.thMonth} ${dateInfo.interMonth} ${dateInfo.thYear}`,
+    `TH เดือน ${dateInfo.padMonth}`,
     `ใบขาย ${dateInfo.thMonth}`,
-    "ใบขาย พ.ย. NOV 69",
-    `TH M${dateInfo.padMonth}`,
-    "TH M11",
   ];
   const interDynamicNames = [
+    `INTER [${dateInfo.padMonth}] ${dateInfo.interMonth} ${dateInfo.engYear}`,
+    `INTER  [${dateInfo.padMonth}] ${dateInfo.interMonth} ${dateInfo.engYear}`,
+    `[${dateInfo.padMonth}] ${dateInfo.interMonth} ${dateInfo.engYear}`,
+    "INTER [11] NOV 2026",
+    "[11] NOV 2026",
     `M${dateInfo.padMonth}`,
     `M${parseInt(dateInfo.padMonth, 10)}`,
     "M11",
-    `[${dateInfo.padMonth}] ${dateInfo.interMonth} ${dateInfo.engYear}`,
-    `${dateInfo.padMonth} ${dateInfo.interMonth} ${dateInfo.engYear}`,
+    `INTER M${dateInfo.padMonth}`,
     `[${dateInfo.padMonth}] ${dateInfo.interMonth}`,
-    "[11] NOV 2026",
-    "11 NOV 2026",
+    `${dateInfo.padMonth} ${dateInfo.interMonth} ${dateInfo.engYear}`,
     "INTER",
   ];
 
