@@ -47,19 +47,19 @@ interface Task {
 }
 
 const CATEGORY_COLORS: Record<string, { bg: string; text: string; border: string; dot: string }> = {
-  สล็อต: { bg: "bg-rose-50/90", text: "text-rose-700", border: "border-rose-200/80", dot: "bg-rose-500" },
-  คาสิโน: { bg: "bg-amber-50/90", text: "text-amber-800", border: "border-amber-200/80", dot: "bg-amber-500" },
-  บอล: { bg: "bg-sky-50/90", text: "text-sky-700", border: "border-sky-200/80", dot: "bg-sky-500" },
-  มวย: { bg: "bg-emerald-50/90", text: "text-emerald-700", border: "border-emerald-200/80", dot: "bg-emerald-500" },
-  หวย: { bg: "bg-purple-50/90", text: "text-purple-700", border: "border-purple-200/80", dot: "bg-purple-500" },
-  "หวย APB": { bg: "bg-violet-50/90", text: "text-violet-700", border: "border-violet-200/80", dot: "bg-violet-500" },
-  เกมสล็อต: { bg: "bg-pink-50/90", text: "text-pink-700", border: "border-pink-200/80", dot: "bg-pink-500" },
-  ไก่ชน: { bg: "bg-orange-50/90", text: "text-orange-700", border: "border-orange-200/80", dot: "bg-orange-500" },
-  วัวชน: { bg: "bg-yellow-50/90", text: "text-yellow-800", border: "border-yellow-200/80", dot: "bg-yellow-500" },
-  "UFA NEWS": { bg: "bg-blue-50/90", text: "text-blue-700", border: "border-blue-200/80", dot: "bg-blue-500" },
-  แคมเปญ: { bg: "bg-teal-50/90", text: "text-teal-700", border: "border-teal-200/80", dot: "bg-teal-500" },
-  กิจกรรมกลาง: { bg: "bg-indigo-50/90", text: "text-indigo-700", border: "border-indigo-200/80", dot: "bg-indigo-500" },
-  Pretty: { bg: "bg-fuchsia-50/90", text: "text-fuchsia-700", border: "border-fuchsia-200/80", dot: "bg-fuchsia-500" },
+  สล็อต: { bg: "bg-[#FBF1EE]", text: "text-[#9E4534]", border: "border-[#EBD4CC]", dot: "bg-[#B85744]" },
+  คาสิโน: { bg: "bg-[#FAF5EC]", text: "text-[#8C6228]", border: "border-[#EBDCC8]", dot: "bg-[#B88746]" },
+  บอล: { bg: "bg-[#EFF4F8]", text: "text-[#365A75]", border: "border-[#D1E1EC]", dot: "bg-[#4F7E9F]" },
+  มวย: { bg: "bg-[#EFF5F0]", text: "text-[#34603B]", border: "border-[#D1E4D4]", dot: "bg-[#4B8355]" },
+  หวย: { bg: "bg-[#F7EFF6]", text: "text-[#713E6B]", border: "border-[#E4CFE2]", dot: "bg-[#94568E]" },
+  "หวย APB": { bg: "bg-[#F4EFF8]", text: "text-[#5C3E7A]", border: "border-[#DECFF0]", dot: "bg-[#7B599E]" },
+  เกมสล็อต: { bg: "bg-[#FAF1F4]", text: "text-[#8E3B55]", border: "border-[#EBD0DA]", dot: "bg-[#B55774]" },
+  ไก่ชน: { bg: "bg-[#F9F2EB]", text: "text-[#8E4D27]", border: "border-[#EAD7C8]", dot: "bg-[#B3693C]" },
+  วัวชน: { bg: "bg-[#FBF7EB]", text: "text-[#846A25]", border: "border-[#ECE1C3]", dot: "bg-[#B1933D]" },
+  "UFA NEWS": { bg: "bg-[#EFF3F8]", text: "text-[#334E6F]", border: "border-[#CDDAE8]", dot: "bg-[#4A6E99]" },
+  แคมเปญ: { bg: "bg-[#EFF6F5]", text: "text-[#306159]", border: "border-[#CFE4E0]", dot: "bg-[#48877D]" },
+  กิจกรรมกลาง: { bg: "bg-[#F4F3F7]", text: "text-[#4F4C68]", border: "border-[#D9D6E4]", dot: "bg-[#6D698B]" },
+  Pretty: { bg: "bg-[#FAF1F6]", text: "text-[#8A3B66]", border: "border-[#EBD0DC]", dot: "bg-[#AF5685]" },
 };
 
 export default function HomePage() {
@@ -733,8 +733,8 @@ const renderDateCheckbox = (s: string) => {
         key={s}
         className={`flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs font-medium cursor-pointer transition-colors ${
           isChecked
-            ? "bg-indigo-50 text-indigo-900 font-bold border border-indigo-200/70"
-            : "hover:bg-slate-50 text-slate-700 border border-transparent"
+            ? "bg-[#F5EFE6] text-[#3D352E] font-bold border border-[#E0D5C3]"
+            : "hover:bg-[#F9F7F2] text-[#5C564D] border border-transparent"
         }`}
       >
         <div className="flex items-center gap-2">
@@ -742,7 +742,7 @@ const renderDateCheckbox = (s: string) => {
             type="checkbox"
             checked={isChecked}
             onChange={() => handleToggleSheet(s)}
-            className="w-4 h-4 text-indigo-600 rounded-sm focus:ring-indigo-500 cursor-pointer"
+            className="w-4 h-4 text-[#8C3A27] rounded-sm focus:ring-[#8C3A27] cursor-pointer"
           />
           <span>{s}</span>
         </div>
@@ -750,8 +750,8 @@ const renderDateCheckbox = (s: string) => {
           <span
             className={`text-[9px] px-1.5 py-0.5 rounded-md font-bold uppercase ${
               isChecked
-                ? "bg-indigo-600 text-white"
-                : "bg-emerald-100 text-emerald-800"
+                ? "bg-[#8C3A27] text-white"
+                : "bg-[#EFF5F0] text-[#34603B]"
             }`}
           >
             ล่าสุด
@@ -766,21 +766,21 @@ const renderDateCheckbox = (s: string) => {
   const completedTasks = totalTasks - pendingTasks;
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] flex flex-col font-sans pb-32">
+    <div className="min-h-screen bg-[#F8F6F0] flex flex-col font-sans pb-32">
       {/* Header Bar */}
-      <header className="bg-white/80 backdrop-blur-md border-b border-slate-200/60 sticky top-0 z-30 transition-all">
+      <header className="bg-[#FDFBF7]/90 backdrop-blur-md border-b border-[#E6E1D7] sticky top-0 z-30 transition-all">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-linear-to-tr from-indigo-500 via-indigo-600 to-purple-600 flex items-center justify-center text-white shadow-sm shadow-indigo-100">
+            <div className="w-10 h-10 rounded-2xl bg-[#8C3A27] flex items-center justify-center text-[#FDFCFB] shadow-sm shadow-[#8C3A27]/20">
               <FolderPlus className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight flex items-center gap-2">
+                <h1 className="text-base sm:text-lg font-bold text-[#2D2A26] tracking-tight flex items-center gap-2">
                   <span>Graphic Drive Sync</span>
                 </h1>
-                <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold bg-emerald-50 text-emerald-700 px-2.5 py-0.5 rounded-full border border-emerald-200/70">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold bg-[#F2ECE1] text-[#6E6352] px-2.5 py-0.5 rounded-full border border-[#E0D5C1]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#5B785D] animate-pulse" />
                   <span>
                     {availableSheets.length > 0
                       ? `${availableSheets.length} วัน / พนักงาน ${staffList.length} คน`
@@ -788,7 +788,7 @@ const renderDateCheckbox = (s: string) => {
                   </span>
                 </span>
               </div>
-              <p className="text-xs text-slate-500 hidden sm:block">
+              <p className="text-xs text-[#7A7368] hidden sm:block">
                 ระบบจัดการสร้างโฟลเดอร์ Google Drive (TH & INTER) และอัปเดตสถานะชีตอัตโนมัติ
               </p>
             </div>
@@ -797,9 +797,9 @@ const renderDateCheckbox = (s: string) => {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setShowGuide(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100/80 hover:bg-slate-200/80 rounded-xl transition-all cursor-pointer active:scale-95"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#5C564D] bg-[#F4F1EA] hover:bg-[#EAE5DC] border border-[#E0DACF] rounded-xl transition-all cursor-pointer active:scale-95"
             >
-              <HelpCircle className="w-3.5 h-3.5 text-slate-500" />
+              <HelpCircle className="w-3.5 h-3.5 text-[#7A7368]" />
               <span className="hidden sm:inline">วิธีตั้งค่าสิทธิ์</span>
               <span className="sm:hidden">วิธีใช้</span>
             </button>
@@ -807,11 +807,11 @@ const renderDateCheckbox = (s: string) => {
               href="https://docs.google.com/spreadsheets/d/1WIm3CzQ708nHcdIFQBnQEDBHWjBGeOCQL_MEAO2rBD8/edit"
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100/90 rounded-xl border border-emerald-200/70 transition-all cursor-pointer shadow-2xs active:scale-95"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-[#34603B] bg-[#EFF5F0] hover:bg-[#E3EEE5] rounded-xl border border-[#D1E4D4] transition-all cursor-pointer shadow-2xs active:scale-95"
             >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+              <FileSpreadsheet className="w-3.5 h-3.5 text-[#34603B]" />
               <span>เปิดชีตหลัก</span>
-              <ExternalLink className="w-3 h-3 text-emerald-500" />
+              <ExternalLink className="w-3 h-3 text-[#34603B]" />
             </a>
           </div>
         </div>
@@ -821,26 +821,26 @@ const renderDateCheckbox = (s: string) => {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full flex flex-col gap-6">
         {/* Error Alert Box */}
         {errorMessage && (
-          <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 flex items-start gap-3">
-            <ShieldAlert className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+          <div className="bg-[#FAF0ED] border border-[#EED0C8] rounded-2xl p-4 flex items-start gap-3">
+            <ShieldAlert className="w-5 h-5 text-[#9E4534] shrink-0 mt-0.5" />
             <div className="flex-1">
-              <h4 className="text-sm font-bold text-rose-900">แจ้งเตือนการเชื่อมต่อ</h4>
-              <p className="text-xs text-rose-700 mt-0.5">{errorMessage}</p>
+              <h4 className="text-sm font-bold text-[#9E4534]">แจ้งเตือนการเชื่อมต่อ</h4>
+              <p className="text-xs text-[#9E4534]/90 mt-0.5">{errorMessage}</p>
             </div>
           </div>
         )}
 
         {/* Filter Controls Card */}
-        <section className="bg-white p-5 rounded-3xl border border-slate-200/60 shadow-xs relative">
+        <section className="bg-white p-5 rounded-3xl border border-[#E6E1D7] shadow-[0_2px_12px_rgba(45,42,38,0.03)] relative">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 items-end">
             {/* 1. Staff Selector */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                  <User className="w-3.5 h-3.5 text-indigo-600" />
+                <label className="text-xs font-bold text-[#4A453E] flex items-center gap-1.5">
+                  <User className="w-3.5 h-3.5 text-[#8C3A27]" />
                   <span>ชื่อพนักงาน / กราฟิก</span>
                 </label>
-                <span className="text-[10px] text-slate-400">เลือกหรือพิมพ์</span>
+                <span className="text-[10px] text-[#9E988E]">เลือกหรือพิมพ์</span>
               </div>
               <div className="relative">
                 <input
@@ -849,7 +849,7 @@ const renderDateCheckbox = (s: string) => {
                   value={assignee}
                   onChange={(e) => handleAssigneeChange(e.target.value)}
                   placeholder="พิมพ์หรือเลือกชื่อ..."
-                  className="w-full px-3.5 py-2 text-sm bg-slate-50/80 hover:bg-slate-50 border border-slate-200/80 rounded-2xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-all font-semibold text-indigo-950"
+                  className="w-full px-3.5 py-2 text-sm bg-[#F7F5EF] hover:bg-[#F2EFE7] border border-[#E2DDD2] rounded-2xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-[#D9D3C5] focus:border-[#B5AEA0] transition-all font-semibold text-[#2D2A26]"
                 />
                 <datalist id="staff-options">
                   {staffList.map((s) => (
@@ -862,11 +862,11 @@ const renderDateCheckbox = (s: string) => {
             {/* 2. Compact Date Dropdown with Checkboxes in front */}
             <div className="relative" ref={dateDropdownRef}>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                  <Calendar className="w-3.5 h-3.5 text-indigo-600" />
+                <label className="text-xs font-bold text-[#4A453E] flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-[#8C3A27]" />
                   <span>เลือกวันที่ต้องการดูงาน</span>
                 </label>
-                <span className="text-[10px] text-indigo-600 font-extrabold bg-indigo-50 px-2 py-0.5 rounded-full">
+                <span className="text-[10px] text-[#6E5D48] font-extrabold bg-[#F4EFE6] border border-[#E0D5C3] px-2 py-0.5 rounded-full">
                   {selectedSheets.includes("ALL")
                     ? "ทุกวัน (ALL)"
                     : `เลือกแล้ว ${selectedSheets.length} วัน`}
@@ -878,42 +878,42 @@ const renderDateCheckbox = (s: string) => {
                 type="button"
                 onClick={() => setIsDateDropdownOpen((prev) => !prev)}
                 disabled={isMetadataLoading}
-                className="w-full flex items-center justify-between px-3.5 py-2 text-sm bg-slate-50/80 hover:bg-white border border-slate-200/80 rounded-2xl transition-all cursor-pointer font-medium text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 text-left shadow-2xs"
+                className="w-full flex items-center justify-between px-3.5 py-2 text-sm bg-[#F7F5EF] hover:bg-white border border-[#E2DDD2] rounded-2xl transition-all cursor-pointer font-medium text-[#2D2A26] focus:outline-hidden focus:ring-2 focus:ring-[#D9D3C5] focus:border-[#B5AEA0] text-left shadow-2xs"
               >
                 <span className="truncate pr-1">
                   {isMetadataLoading ? (
-                    <span className="text-slate-400">กำลังดึงวันที่...</span>
+                    <span className="text-[#9E988E]">กำลังดึงวันที่...</span>
                   ) : selectedSheets.includes("ALL") ? (
-                    <span className="text-indigo-700 font-bold">ทุกวันที่ (ALL)</span>
+                    <span className="text-[#8C3A27] font-bold">ทุกวันที่ (ALL)</span>
                   ) : selectedSheets.length === 0 ? (
-                    <span className="text-slate-400">เลือกวันที่...</span>
+                    <span className="text-[#9E988E]">เลือกวันที่...</span>
                   ) : selectedSheets.length <= 2 ? (
                     <span>{selectedSheets.join(", ")}</span>
                   ) : (
                     <span>
                       {selectedSheets.slice(0, 2).join(", ")}{" "}
-                      <span className="text-xs text-indigo-600 font-bold">
+                      <span className="text-xs text-[#8C3A27] font-bold">
                         (+{selectedSheets.length - 2})
                       </span>
                     </span>
                   )}
                 </span>
                 {isDateDropdownOpen ? (
-                  <ChevronUp className="w-4 h-4 text-slate-400 shrink-0" />
+                  <ChevronUp className="w-4 h-4 text-[#7A7368] shrink-0" />
                 ) : (
-                  <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
+                  <ChevronDown className="w-4 h-4 text-[#7A7368] shrink-0" />
                 )}
               </button>
 
               {/* Dropdown Popover with Checkboxes */}
               {isDateDropdownOpen && (
-                <div className="absolute left-0 right-0 sm:w-80 sm:right-auto mt-2 bg-white border border-slate-200/80 rounded-3xl shadow-xl z-50 p-4 animate-in fade-in duration-150">
-                  <div className="flex items-center justify-between pb-2.5 mb-2.5 border-b border-slate-100">
-                    <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                      <Calendar className="w-3.5 h-3.5 text-indigo-600" />
+                <div className="absolute left-0 right-0 sm:w-80 sm:right-auto mt-2 bg-white border border-[#E6E1D7] rounded-3xl shadow-xl z-50 p-4 animate-in fade-in duration-150">
+                  <div className="flex items-center justify-between pb-2.5 mb-2.5 border-b border-[#F0ECE4]">
+                    <span className="text-xs font-bold text-[#2D2A26] flex items-center gap-1.5">
+                      <Calendar className="w-3.5 h-3.5 text-[#8C3A27]" />
                       <span>เลือกวันที่</span>
                     </span>
-                    <span className="text-[10px] text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full font-extrabold">
+                    <span className="text-[10px] text-[#6E5D48] bg-[#F4EFE6] border border-[#E0D5C3] px-2 py-0.5 rounded-full font-extrabold">
                       {selectedSheets.includes("ALL")
                         ? "ทุกวันที่"
                         : `${selectedSheets.length} วัน`}
@@ -927,8 +927,8 @@ const renderDateCheckbox = (s: string) => {
                       onClick={() => handleSelectPreset("today")}
                       className={`px-2 py-1.5 text-xs font-bold rounded-xl border text-center transition-all cursor-pointer ${
                         selectedSheets.length === 1 && selectedSheets[0] === availableSheets[0]
-                          ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs"
-                          : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                          ? "bg-[#2D2A26] text-white border-[#2D2A26] shadow-2xs"
+                          : "bg-[#F7F5EF] text-[#5C564D] border-[#E2DDD2] hover:bg-[#EAE6DD]"
                       }`}
                     >
                       วันนี้
@@ -938,8 +938,8 @@ const renderDateCheckbox = (s: string) => {
                       onClick={() => handleSelectPreset("last3")}
                       className={`px-2 py-1.5 text-xs font-bold rounded-xl border text-center transition-all cursor-pointer ${
                         selectedSheets.length === 3 && !selectedSheets.includes("ALL")
-                          ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs"
-                          : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                          ? "bg-[#2D2A26] text-white border-[#2D2A26] shadow-2xs"
+                          : "bg-[#F7F5EF] text-[#5C564D] border-[#E2DDD2] hover:bg-[#EAE6DD]"
                       }`}
                     >
                       3 วันล่าสุด
@@ -952,8 +952,8 @@ const renderDateCheckbox = (s: string) => {
                         monthGroups.nov.length > 0 &&
                         monthGroups.nov.every((s) => selectedSheets.includes(s)) &&
                         selectedSheets.length === monthGroups.nov.length
-                          ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs"
-                          : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                          ? "bg-[#2D2A26] text-white border-[#2D2A26] shadow-2xs"
+                          : "bg-[#F7F5EF] text-[#5C564D] border-[#E2DDD2] hover:bg-[#EAE6DD]"
                       }`}
                     >
                       ทั้งเดือน พ.ย.
@@ -966,8 +966,8 @@ const renderDateCheckbox = (s: string) => {
                         monthGroups.oct.length > 0 &&
                         monthGroups.oct.every((s) => selectedSheets.includes(s)) &&
                         selectedSheets.length === monthGroups.oct.length
-                          ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs"
-                          : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                          ? "bg-[#2D2A26] text-white border-[#2D2A26] shadow-2xs"
+                          : "bg-[#F7F5EF] text-[#5C564D] border-[#E2DDD2] hover:bg-[#EAE6DD]"
                       }`}
                     >
                       ทั้งเดือน ต.ค.
@@ -978,17 +978,17 @@ const renderDateCheckbox = (s: string) => {
                     onClick={() => handleSelectPreset("all")}
                     className={`w-full py-1.5 text-xs font-bold rounded-xl border text-center transition-all cursor-pointer mb-2.5 ${
                       selectedSheets.includes("ALL")
-                        ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs"
-                        : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                        ? "bg-[#2D2A26] text-white border-[#2D2A26] shadow-2xs"
+                        : "bg-[#F7F5EF] text-[#5C564D] border-[#E2DDD2] hover:bg-[#EAE6DD]"
                     }`}
                   >
                     ทุกวันที่ทุกเดือน (ALL - 52 วัน)
                   </button>
 
                   {/* Scrollable Date Checkbox List Grouped by Month */}
-                  <div className="max-h-60 overflow-y-auto space-y-3 pr-1 border-t border-slate-100 pt-2">
+                  <div className="max-h-60 overflow-y-auto space-y-3 pr-1 border-t border-[#F0ECE4] pt-2">
                     {availableSheets.length === 0 ? (
-                      <div className="py-4 text-center text-xs text-slate-400 italic">
+                      <div className="py-4 text-center text-xs text-[#9E988E] italic">
                         กำลังดึงวันที่...
                       </div>
                     ) : (
@@ -996,14 +996,14 @@ const renderDateCheckbox = (s: string) => {
                         {/* เดือน พ.ย. */}
                         {monthGroups.nov.length > 0 && (
                           <div>
-                            <div className="flex items-center justify-between px-2.5 py-1 bg-slate-100 rounded-xl mb-1 sticky top-0 z-10 shadow-2xs">
-                              <span className="text-[11px] font-bold text-slate-700">
+                            <div className="flex items-center justify-between px-2.5 py-1 bg-[#F4F1EA] rounded-xl mb-1 sticky top-0 z-10 shadow-2xs">
+                              <span className="text-[11px] font-bold text-[#4A453E]">
                                 เดือน พ.ย. ({monthGroups.nov.length} วัน)
                               </span>
                               <button
                                 type="button"
                                 onClick={() => handleToggleMonthGroup(monthGroups.nov)}
-                                className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                                className="text-[10px] font-bold text-[#8C3A27] hover:text-[#732C1D] cursor-pointer"
                               >
                                 {monthGroups.nov.every((s) => selectedSheets.includes(s))
                                   ? "ยกเลิกทั้งเดือน"
@@ -1019,14 +1019,14 @@ const renderDateCheckbox = (s: string) => {
                         {/* เดือน ต.ค. */}
                         {monthGroups.oct.length > 0 && (
                           <div>
-                            <div className="flex items-center justify-between px-2.5 py-1 bg-slate-100 rounded-xl mb-1 sticky top-0 z-10 shadow-2xs">
-                              <span className="text-[11px] font-bold text-slate-700">
+                            <div className="flex items-center justify-between px-2.5 py-1 bg-[#F4F1EA] rounded-xl mb-1 sticky top-0 z-10 shadow-2xs">
+                              <span className="text-[11px] font-bold text-[#4A453E]">
                                 เดือน ต.ค. ({monthGroups.oct.length} วัน)
                               </span>
                               <button
                                 type="button"
                                 onClick={() => handleToggleMonthGroup(monthGroups.oct)}
-                                className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                                className="text-[10px] font-bold text-[#8C3A27] hover:text-[#732C1D] cursor-pointer"
                               >
                                 {monthGroups.oct.every((s) => selectedSheets.includes(s))
                                   ? "ยกเลิกทั้งเดือน"
@@ -1042,14 +1042,14 @@ const renderDateCheckbox = (s: string) => {
                         {/* แผ่นงานอื่นๆ */}
                         {monthGroups.other.length > 0 && (
                           <div>
-                            <div className="flex items-center justify-between px-2.5 py-1 bg-slate-100 rounded-xl mb-1 sticky top-0 z-10 shadow-2xs">
-                              <span className="text-[11px] font-bold text-slate-700">
+                            <div className="flex items-center justify-between px-2.5 py-1 bg-[#F4F1EA] rounded-xl mb-1 sticky top-0 z-10 shadow-2xs">
+                              <span className="text-[11px] font-bold text-[#4A453E]">
                                 แผ่นงานอื่นๆ ({monthGroups.other.length} แผ่น)
                               </span>
                               <button
                                 type="button"
                                 onClick={() => handleToggleMonthGroup(monthGroups.other)}
-                                className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                                className="text-[10px] font-bold text-[#8C3A27] hover:text-[#732C1D] cursor-pointer"
                               >
                                 {monthGroups.other.every((s) => selectedSheets.includes(s))
                                   ? "ยกเลิก"
@@ -1066,7 +1066,7 @@ const renderDateCheckbox = (s: string) => {
                   </div>
 
                   {/* Dropdown Footer */}
-                  <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between">
+                  <div className="mt-3 pt-2.5 border-t border-[#F0ECE4] flex items-center justify-between">
                     <button
                       type="button"
                       onClick={() => {
@@ -1079,14 +1079,14 @@ const renderDateCheckbox = (s: string) => {
                         }
                         setIsLoading(false);
                       }}
-                      className="text-[11px] text-slate-400 hover:text-rose-600 font-medium cursor-pointer transition-colors"
+                      className="text-[11px] text-[#9E988E] hover:text-[#9E4534] font-medium cursor-pointer transition-colors"
                     >
                       ล้างการเลือกทั้งหมด
                     </button>
                     <button
                       type="button"
                       onClick={() => setIsDateDropdownOpen(false)}
-                      className="px-3.5 py-1 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl cursor-pointer transition-all"
+                      className="px-3.5 py-1 text-xs font-bold text-[#FDFCFB] bg-[#2D2A26] hover:bg-[#1C1A17] rounded-xl cursor-pointer transition-all"
                     >
                       ตกลง
                     </button>
@@ -1097,8 +1097,8 @@ const renderDateCheckbox = (s: string) => {
 
             {/* 3. Search Category */}
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
-                <Search className="w-3.5 h-3.5 text-slate-400" />
+              <label className="block text-xs font-bold text-[#4A453E] mb-1.5 flex items-center gap-1.5">
+                <Search className="w-3.5 h-3.5 text-[#9E988E]" />
                 <span>ค้นหาหมวดหมู่งาน</span>
               </label>
               <input
@@ -1106,7 +1106,7 @@ const renderDateCheckbox = (s: string) => {
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder="เช่น หวย APB, สล็อต, บอล..."
-                className="w-full px-3.5 py-2 text-sm bg-slate-50/80 hover:bg-slate-50 border border-slate-200/80 rounded-2xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-all font-medium text-slate-800"
+                className="w-full px-3.5 py-2 text-sm bg-[#F7F5EF] hover:bg-[#F2EFE7] border border-[#E2DDD2] rounded-2xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-[#D9D3C5] focus:border-[#B5AEA0] transition-all font-medium text-[#2D2A26]"
               />
             </div>
 
@@ -1118,7 +1118,7 @@ const renderDateCheckbox = (s: string) => {
                   fetchTasks(assignee, selectedSheets, true);
                 }}
                 disabled={isLoading || isMetadataLoading || selectedSheets.length === 0}
-                className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-bold text-white bg-linear-to-r from-indigo-600 via-indigo-500 to-violet-600 hover:from-indigo-700 hover:to-violet-700 active:scale-[0.98] rounded-2xl shadow-sm shadow-indigo-100 transition-all disabled:opacity-60 cursor-pointer"
+                className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-bold text-[#FDFCFB] bg-[#2D2A26] hover:bg-[#1C1A17] active:scale-[0.98] rounded-2xl shadow-sm shadow-[#2D2A26]/15 transition-all disabled:opacity-50 cursor-pointer"
               >
                 <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
                 <span>
@@ -1133,69 +1133,69 @@ const renderDateCheckbox = (s: string) => {
           </div>
 
           {/* Sub-bar: Status Filter & Selection Summary */}
-          <div className="mt-4 pt-3.5 border-t border-slate-100 flex items-center justify-between flex-wrap gap-2 text-xs">
+          <div className="mt-4 pt-3.5 border-t border-[#F0ECE4] flex items-center justify-between flex-wrap gap-2 text-xs">
             <div className="flex items-center gap-3 flex-wrap">
               <button
                 type="button"
                 onClick={() => setPendingOnly((prev) => !prev)}
                 className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-95 ${
                   pendingOnly
-                    ? "bg-amber-50 text-amber-800 border border-amber-200/80 shadow-2xs"
-                    : "bg-slate-100/90 text-slate-600 border border-slate-200/60 hover:bg-slate-200/60"
+                    ? "bg-[#FAF4EB] text-[#8C6228] border border-[#EADCC8] shadow-2xs"
+                    : "bg-[#F4F1EA] text-[#6E675D] border border-[#E2DDD2] hover:bg-[#ECE7DC]"
                 }`}
               >
                 <span
                   className={`w-2 h-2 rounded-full transition-all ${
-                    pendingOnly ? "bg-amber-500 ring-2 ring-amber-200 animate-pulse" : "bg-slate-400"
+                    pendingOnly ? "bg-[#B88746] ring-2 ring-[#F0E0C8] animate-pulse" : "bg-[#B0AAA0]"
                   }`}
                 />
                 <span>แสดงเฉพาะงานที่ยังไม่เสร็จ</span>
               </button>
 
               {!selectedSheets.includes("ALL") && selectedSheets.length > 0 && (
-                <span className="text-[11px] text-slate-500 flex items-center gap-1.5">
+                <span className="text-[11px] text-[#7A7368] flex items-center gap-1.5">
                   <span>กำลังดู:</span>
-                  <span className="font-bold text-indigo-900 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100">
+                  <span className="font-bold text-[#6E5D48] bg-[#F4EFE6] border border-[#E0D5C3] px-2 py-0.5 rounded-md">
                     {selectedSheets.join(", ")}
                   </span>
                 </span>
               )}
             </div>
 
-            <span className="text-slate-500 text-xs">
-              พบทั้งหมด <b className="text-indigo-600 font-extrabold">{filteredTasks.length}</b> รายการของ <b>{assignee}</b>
+            <span className="text-[#7A7368] text-xs">
+              พบทั้งหมด <b className="text-[#8C3A27] font-extrabold">{filteredTasks.length}</b> รายการของ <b>{assignee}</b>
             </span>
           </div>
         </section>
 
         {/* Stats Summary Banner */}
         <section className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-          <div className="bg-white/90 backdrop-blur-xs p-4 rounded-3xl border border-slate-200/60 shadow-xs flex items-center justify-between hover:shadow-sm transition-all group">
+          <div className="bg-white p-4.5 rounded-3xl border border-[#E6E1D7] shadow-[0_2px_12px_rgba(45,42,38,0.02)] flex items-center justify-between hover:shadow-xs transition-all group">
             <div>
-              <p className="text-xs font-semibold text-slate-500">งานทั้งหมดของ &quot;{assignee}&quot;</p>
-              <p className="text-2xl font-black text-slate-800 mt-0.5">{totalTasks}</p>
+              <p className="text-xs font-semibold text-[#7A7368]">งานทั้งหมดของ &quot;{assignee}&quot;</p>
+              <p className="text-2xl font-black text-[#2D2A26] mt-0.5">{totalTasks}</p>
             </div>
-            <div className="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center shadow-2xs group-hover:scale-105 transition-transform">
+            <div className="w-10 h-10 rounded-2xl bg-[#F4F1EA] text-[#5C564D] flex items-center justify-center shadow-2xs group-hover:scale-105 transition-transform">
               <Layers className="w-5 h-5" />
             </div>
           </div>
 
-          <div className="bg-white/90 backdrop-blur-xs p-4 rounded-3xl border border-amber-200/60 shadow-xs flex items-center justify-between hover:shadow-sm transition-all group">
+          <div className="bg-white p-4.5 rounded-3xl border border-[#EEDFCF] shadow-[0_2px_12px_rgba(45,42,38,0.02)] flex items-center justify-between hover:shadow-xs transition-all group">
             <div>
-              <p className="text-xs font-semibold text-amber-700">รอสร้างโฟลเดอร์ (ยังไม่เสร็จ)</p>
-              <p className="text-2xl font-black text-amber-600 mt-0.5">{pendingTasks}</p>
+              <p className="text-xs font-semibold text-[#8C6228]">รอสร้างโฟลเดอร์ (ยังไม่เสร็จ)</p>
+              <p className="text-2xl font-black text-[#8C6228] mt-0.5">{pendingTasks}</p>
             </div>
-            <div className="w-10 h-10 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center shadow-2xs group-hover:scale-105 transition-transform">
+            <div className="w-10 h-10 rounded-2xl bg-[#FAF4EB] text-[#8C6228] flex items-center justify-center shadow-2xs group-hover:scale-105 transition-transform">
               <Clock className="w-5 h-5" />
             </div>
           </div>
 
-          <div className="bg-white/90 backdrop-blur-xs p-4 rounded-3xl border border-emerald-200/60 shadow-xs flex items-center justify-between hover:shadow-sm transition-all group">
+          <div className="bg-white p-4.5 rounded-3xl border border-[#D7E6D9] shadow-[0_2px_12px_rgba(45,42,38,0.02)] flex items-center justify-between hover:shadow-xs transition-all group">
             <div>
-              <p className="text-xs font-semibold text-emerald-700">สร้างโฟลเดอร์เสร็จแล้ว</p>
-              <p className="text-2xl font-black text-emerald-600 mt-0.5">{completedTasks}</p>
+              <p className="text-xs font-semibold text-[#34603B]">สร้างโฟลเดอร์เสร็จแล้ว</p>
+              <p className="text-2xl font-black text-[#34603B] mt-0.5">{completedTasks}</p>
             </div>
-            <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center shadow-2xs group-hover:scale-105 transition-transform">
+            <div className="w-10 h-10 rounded-2xl bg-[#EFF5F0] text-[#34603B] flex items-center justify-center shadow-2xs group-hover:scale-105 transition-transform">
               <CheckCircle2 className="w-5 h-5" />
             </div>
           </div>
@@ -1203,16 +1203,16 @@ const renderDateCheckbox = (s: string) => {
 
         {/* Sync Result Banner (With Dual Links: TH & INTER) */}
         {syncResult && (
-          <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 shadow-xs">
+          <div className="bg-[#EFF5F0] border border-[#D1E4D4] rounded-3xl p-5 shadow-xs">
             <div className="flex items-start gap-3">
-              <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+              <div className="w-8 h-8 rounded-xl bg-[#D8EADB] text-[#34603B] flex items-center justify-center shrink-0">
                 <CheckCircle2 className="w-5 h-5" />
               </div>
               <div className="flex-1">
-                <h3 className="text-sm font-bold text-emerald-900">
+                <h3 className="text-sm font-bold text-[#2A4D30]">
                   {syncResult.message}
                 </h3>
-                <p className="text-xs text-emerald-700 mt-0.5">
+                <p className="text-xs text-[#34603B]/90 mt-0.5">
                   ระบบได้สร้างโฟลเดอร์ให้ครบทั้งฝั่ง TH และ INTER พร้อมแปะลิงก์ของ TH ลงในช่อง Col F และเปลี่ยนสถานะเป็น &quot;เสร็จสิ้น&quot; แล้วครับ สามารถกดเปิดโฟลเดอร์เพื่ออัปโหลดไฟล์งานได้ทันที:
                 </p>
 
@@ -1221,28 +1221,28 @@ const renderDateCheckbox = (s: string) => {
                     {syncResult.updatedTasks.map((item, idx) => (
                       <div
                         key={idx}
-                        className="bg-white p-3.5 rounded-xl border border-emerald-200 flex flex-col gap-2.5 shadow-2xs"
+                        className="bg-[#FDFBF7] p-3.5 rounded-2xl border border-[#E2DDD2] flex flex-col gap-2.5 shadow-2xs"
                       >
-                        <div className="flex items-center justify-between font-semibold text-slate-800 text-xs">
-                          <span className="truncate mr-2 font-mono text-indigo-900 font-bold">
+                        <div className="flex items-center justify-between font-semibold text-[#2D2A26] text-xs">
+                          <span className="truncate mr-2 font-mono text-[#5E513F] font-bold">
                             {item.sheetName} | แถว #{item.row} | {item.taskName}
                           </span>
-                          <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full shrink-0">
+                          <span className="text-[10px] bg-[#EFF5F0] text-[#34603B] border border-[#D1E4D4] font-bold px-2 py-0.5 rounded-full shrink-0">
                             เสร็จสิ้น
                           </span>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-slate-100">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-[#EFEBE4]">
                           {/* TH Link Button */}
-                          <div className="flex items-center gap-1.5 bg-emerald-50/60 p-2 rounded-lg border border-emerald-100">
-                            <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded shrink-0">TH</span>
+                          <div className="flex items-center gap-1.5 bg-[#EFF5F0] p-2 rounded-xl border border-[#D1E4D4]">
+                            <span className="text-[10px] font-bold text-[#34603B] bg-[#D8EADB] px-1.5 py-0.5 rounded shrink-0">TH</span>
                             <div className="flex-1 min-w-0">
-                              <p className="text-[10px] font-bold text-emerald-900">โฟลเดอร์ TH</p>
+                              <p className="text-[10px] font-bold text-[#2A4D30]">โฟลเดอร์ TH</p>
                               <a
                                 href={item.thFolderUrl}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="text-xs text-indigo-600 font-bold hover:underline inline-flex items-center gap-1 truncate"
+                                className="text-xs text-[#34603B] font-bold hover:underline inline-flex items-center gap-1 truncate"
                               >
                                 <span>เปิด Drive</span>
                                 <ExternalLink className="w-3 h-3" />
@@ -1250,7 +1250,7 @@ const renderDateCheckbox = (s: string) => {
                             </div>
                             <button
                               onClick={() => copyToClipboard(item.thFolderUrl, `th_${idx}`)}
-                              className="p-1 text-slate-400 hover:text-slate-600"
+                              className="p-1 text-[#7A7368] hover:text-[#2D2A26]"
                               title="คัดลอกลิงก์ TH"
                             >
                               <Copy className="w-3.5 h-3.5" />
@@ -1258,28 +1258,28 @@ const renderDateCheckbox = (s: string) => {
                           </div>
 
                           {/* INTER Link Button */}
-                          <div className="flex items-center gap-1.5 bg-sky-50/60 p-2 rounded-lg border border-sky-100">
-                            <span className="text-xs font-bold text-sky-700 bg-sky-100 px-1.5 py-0.5 rounded shrink-0">INTER</span>
+                          <div className="flex items-center gap-1.5 bg-[#EFF3F8] p-2 rounded-xl border border-[#CDDAE8]">
+                            <span className="text-[10px] font-bold text-[#334E6F] bg-[#D6E3F0] px-1.5 py-0.5 rounded shrink-0">INTER</span>
                             <div className="flex-1 min-w-0">
-                              <p className="text-[10px] font-bold text-sky-900">โฟลเดอร์ INTER</p>
+                              <p className="text-[10px] font-bold text-[#20344D]">โฟลเดอร์ INTER</p>
                               {item.interFolderUrl ? (
                                 <a
                                   href={item.interFolderUrl}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="text-xs text-sky-700 font-bold hover:underline inline-flex items-center gap-1 truncate"
+                                  className="text-xs text-[#334E6F] font-bold hover:underline inline-flex items-center gap-1 truncate"
                                 >
                                   <span>เปิด Drive</span>
                                   <ExternalLink className="w-3 h-3" />
                                 </a>
                               ) : (
-                                <span className="text-[11px] text-slate-400 italic">-</span>
+                                <span className="text-[11px] text-[#A8A196] italic">-</span>
                               )}
                             </div>
                             {item.interFolderUrl && (
                               <button
                                 onClick={() => copyToClipboard(item.interFolderUrl, `inter_${idx}`)}
-                                className="p-1 text-slate-400 hover:text-slate-600"
+                                className="p-1 text-[#7A7368] hover:text-[#2D2A26]"
                                 title="คัดลอกลิงก์ INTER"
                               >
                                 <Copy className="w-3.5 h-3.5" />
@@ -1289,10 +1289,10 @@ const renderDateCheckbox = (s: string) => {
                         </div>
 
                         {copiedLink && copiedLink.startsWith(`th_${idx}`) && (
-                          <span className="text-[10px] text-emerald-600 font-medium">คัดลอกลิงก์ TH เรียบร้อย</span>
+                          <span className="text-[10px] text-[#34603B] font-medium">คัดลอกลิงก์ TH เรียบร้อย</span>
                         )}
                         {copiedLink && copiedLink.startsWith(`inter_${idx}`) && (
-                          <span className="text-[10px] text-sky-600 font-medium">คัดลอกลิงก์ INTER เรียบร้อย</span>
+                          <span className="text-[10px] text-[#334E6F] font-medium">คัดลอกลิงก์ INTER เรียบร้อย</span>
                         )}
                       </div>
                     ))}
@@ -1305,28 +1305,28 @@ const renderDateCheckbox = (s: string) => {
 
         {/* Task List Grouped by Date */}
         {isMetadataLoading ? (
-          <section className="bg-white rounded-2xl border border-slate-200 p-12 text-center shadow-xs">
-            <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto mb-3 shadow-inner">
+          <section className="bg-[#FDFBF7] rounded-3xl border border-[#E6E1D7] p-12 text-center shadow-xs">
+            <div className="w-12 h-12 rounded-2xl bg-[#F5EFE6] text-[#8C3A27] flex items-center justify-center mx-auto mb-3 shadow-inner">
               <RefreshCw className="w-6 h-6 animate-spin" />
             </div>
-            <h4 className="text-base font-bold text-slate-800">กำลังเชื่อมต่อ Google Sheets...</h4>
-            <p className="text-xs text-slate-400 mt-1">กำลังดึงแท็บวันที่และรายชื่อพนักงานจริงจากชีต กรุณารอสักครู่</p>
+            <h4 className="text-base font-bold text-[#2D2A26]">กำลังเชื่อมต่อ Google Sheets...</h4>
+            <p className="text-xs text-[#7A7368] mt-1">กำลังดึงแท็บวันที่และรายชื่อพนักงานจริงจากชีต กรุณารอสักครู่</p>
           </section>
         ) : isLoading ? (
-          <section className="bg-white rounded-2xl border border-slate-200 p-12 text-center shadow-xs">
-            <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto mb-3 shadow-inner">
+          <section className="bg-[#FDFBF7] rounded-3xl border border-[#E6E1D7] p-12 text-center shadow-xs">
+            <div className="w-12 h-12 rounded-2xl bg-[#F5EFE6] text-[#8C3A27] flex items-center justify-center mx-auto mb-3 shadow-inner">
               <RefreshCw className="w-6 h-6 animate-spin" />
             </div>
-            <h4 className="text-base font-bold text-slate-800">กำลังค้นหางานจาก Google Sheets...</h4>
-            <p className="text-xs text-slate-400 mt-1">กรุณารอสักครู่ ระบบกำลังดึงข้อมูลล่าสุด</p>
+            <h4 className="text-base font-bold text-[#2D2A26]">กำลังค้นหางานจาก Google Sheets...</h4>
+            <p className="text-xs text-[#7A7368] mt-1">กรุณารอสักครู่ ระบบกำลังดึงข้อมูลล่าสุด</p>
           </section>
         ) : selectedSheets.length === 0 ? (
-          <section className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-400 shadow-xs">
-            <Calendar className="w-10 h-10 mx-auto mb-2 text-slate-300" />
-            <h4 className="font-bold text-slate-700 text-base">
+          <section className="bg-[#FDFBF7] rounded-3xl border border-[#E6E1D7] p-12 text-center text-[#7A7368] shadow-xs">
+            <Calendar className="w-10 h-10 mx-auto mb-2 text-[#C8C2B7]" />
+            <h4 className="font-bold text-[#2D2A26] text-base">
               ยังไม่ได้เลือกวันที่
             </h4>
-            <p className="text-xs text-slate-400 mt-1">
+            <p className="text-xs text-[#7A7368] mt-1">
               กรุณาคลิกเลือกวันที่ต้องการดูงานจากเมนูด้านบน หรือกดเลือกดูงานวันล่าสุด
             </p>
             <div className="mt-4 flex items-center justify-center gap-2 flex-wrap">
@@ -1339,7 +1339,7 @@ const renderDateCheckbox = (s: string) => {
                     fetchTasks(assignee, latest, true);
                   }
                 }}
-                className="px-3.5 py-1.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 text-xs font-semibold rounded-xl transition-all inline-flex items-center gap-1.5 cursor-pointer"
+                className="px-3.5 py-1.5 bg-[#F5EFE6] text-[#5E513F] hover:bg-[#EAE3D6] border border-[#DED4C3] text-xs font-semibold rounded-xl transition-all inline-flex items-center gap-1.5 cursor-pointer"
               >
                 <Calendar className="w-3.5 h-3.5" />
                 <span>เลือกวันล่าสุด ({availableSheets[0] || "วันล่าสุด"})</span>
@@ -1350,7 +1350,7 @@ const renderDateCheckbox = (s: string) => {
                   localStorage.setItem("gds_selectedSheets", JSON.stringify(["ALL"]));
                   fetchTasks(assignee, ["ALL"], true);
                 }}
-                className="px-3.5 py-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200 text-xs font-semibold rounded-xl transition-all inline-flex items-center gap-1.5 cursor-pointer"
+                className="px-3.5 py-1.5 bg-[#FAF4EB] text-[#8C6228] hover:bg-[#F3EAD9] border border-[#EADFCB] text-xs font-semibold rounded-xl transition-all inline-flex items-center gap-1.5 cursor-pointer"
               >
                 <Search className="w-3.5 h-3.5" />
                 <span>ดูทุกวันที่ (ALL)</span>
@@ -1359,33 +1359,33 @@ const renderDateCheckbox = (s: string) => {
           </section>
         ) : Object.keys(groupedTasksByDate).length === 0 ? (
           pendingOnly && tasks.length > 0 && pendingTasks === 0 ? (
-            <section className="bg-emerald-50/80 border border-emerald-200 rounded-2xl p-8 text-center shadow-xs">
-              <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-3 shadow-2xs">
+            <section className="bg-[#EFF5F0] border border-[#D1E4D4] rounded-3xl p-8 text-center shadow-xs">
+              <div className="w-12 h-12 bg-[#D8EADB] text-[#34603B] rounded-full flex items-center justify-center mx-auto mb-3 shadow-2xs">
                 <CheckCircle2 className="w-6 h-6" />
               </div>
-              <h4 className="text-base font-extrabold text-emerald-900">
+              <h4 className="text-base font-extrabold text-[#2A4D30]">
                 ยอดเยี่ยมมาก! งานทั้งหมดของ &quot;{assignee}&quot; ในวันที่ {sheetName} เสร็จสิ้นครบแล้ว
               </h4>
-              <p className="text-xs text-emerald-700 mt-1.5 max-w-md mx-auto leading-relaxed">
+              <p className="text-xs text-[#34603B] mt-1.5 max-w-md mx-auto leading-relaxed">
                 คุณได้สร้างโฟลเดอร์และอัปงานครบแล้วทั้ง <b>{completedTasks}</b> รายการ ไม่มีงานที่ยังค้างอยู่
               </p>
               <div className="mt-4 flex items-center justify-center gap-2">
                 <button
                   onClick={() => setPendingOnly(false)}
-                  className="px-4 py-2 bg-white text-emerald-700 hover:text-emerald-800 border border-emerald-300 hover:bg-emerald-50 text-xs font-bold rounded-xl shadow-xs transition-all inline-flex items-center gap-1.5 cursor-pointer"
+                  className="px-4 py-2 bg-[#FDFBF7] text-[#34603B] hover:bg-[#EFF5F0] border border-[#D1E4D4] text-xs font-bold rounded-xl shadow-xs transition-all inline-flex items-center gap-1.5 cursor-pointer"
                 >
-                  <FolderCheck className="w-4 h-4 text-emerald-600" />
+                  <FolderCheck className="w-4 h-4 text-[#34603B]" />
                   <span>คลิกดูรายการงานที่อัปเสร็จแล้ว ({completedTasks} งาน)</span>
                 </button>
               </div>
             </section>
           ) : (
-            <section className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-400 shadow-xs">
-              <AlertCircle className="w-10 h-10 mx-auto mb-2 text-slate-300" />
-              <h4 className="font-bold text-slate-700 text-base">
+            <section className="bg-[#FDFBF7] rounded-3xl border border-[#E6E1D7] p-12 text-center text-[#7A7368] shadow-xs">
+              <AlertCircle className="w-10 h-10 mx-auto mb-2 text-[#C8C2B7]" />
+              <h4 className="font-bold text-[#2D2A26] text-base">
                 ไม่พบงานที่มอบหมายให้ &quot;{assignee}&quot; ในแผ่นงาน {sheetName}
               </h4>
-              <p className="text-xs text-slate-400 mt-1">
+              <p className="text-xs text-[#7A7368] mt-1">
                 ลองตรวจสอบชื่อผู้รับงาน หรือเลือก <b>&quot;ทุกวันที่ (ค้นหางานค้างข้ามแท็บ)&quot;</b> เพื่อค้นหา
               </p>
               <button
@@ -1394,7 +1394,7 @@ const renderDateCheckbox = (s: string) => {
                   localStorage.setItem("gds_selectedSheets", JSON.stringify(["ALL"]));
                   fetchTasks(assignee, ["ALL"]);
                 }}
-                className="mt-4 px-3.5 py-1.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 text-xs font-semibold rounded-xl transition-all inline-flex items-center gap-1.5 cursor-pointer"
+                className="mt-4 px-3.5 py-1.5 bg-[#FAF4EB] text-[#8C6228] hover:bg-[#F3EAD9] border border-[#EADFCB] text-xs font-semibold rounded-xl transition-all inline-flex items-center gap-1.5 cursor-pointer"
               >
                 <Search className="w-3.5 h-3.5" />
                 <span>ค้นหางานข้ามทุกวันที่ (ALL)</span>
@@ -1405,21 +1405,21 @@ const renderDateCheckbox = (s: string) => {
           <>
             {/* Streaming Progress Banner */}
             {streamingProgress && (
-              <div className="bg-linear-to-r from-indigo-50/90 to-violet-50/90 border border-indigo-200 rounded-2xl p-3.5 flex items-center justify-between shadow-2xs">
+              <div className="bg-[#FAF5EC] border border-[#EADFCB] rounded-2xl p-3.5 flex items-center justify-between shadow-2xs">
                 <div className="flex items-center gap-3">
                   <span className="relative flex h-3 w-3">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-3 w-3 bg-indigo-600"></span>
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#8C3A27] opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-[#8C3A27]"></span>
                   </span>
                   <div>
-                    <p className="text-xs font-bold text-indigo-950 flex items-center gap-1.5 flex-wrap">
+                    <p className="text-xs font-bold text-[#2D2A26] flex items-center gap-1.5 flex-wrap">
                       <span>กำลังทยอยดึงข้อมูลจาก Google Sheets...</span>
-                      <span className="bg-indigo-100 text-indigo-800 text-[11px] font-extrabold px-2 py-0.5 rounded-full border border-indigo-200">
+                      <span className="bg-[#FAF4EB] text-[#8C6228] text-[11px] font-extrabold px-2 py-0.5 rounded-full border border-[#EADFCB]">
                         แสดงแล้ว {streamingProgress.current} จากทั้งหมด {streamingProgress.total} วัน
                       </span>
                     </p>
                     {streamingProgress.activeSheet && (
-                      <p className="text-[11px] text-indigo-600/90 mt-0.5">
+                      <p className="text-[11px] text-[#7A7368] mt-0.5">
                         แผ่นงานที่ดึงเสร็จแล้วจะนำขึ้นมาแสดงทันที (กำลังดึง: {streamingProgress.activeSheet})
                       </p>
                     )}
@@ -1431,7 +1431,7 @@ const renderDateCheckbox = (s: string) => {
                     setStreamingProgress(null);
                     setIsLoading(false);
                   }}
-                  className="text-xs font-bold text-indigo-700 hover:text-indigo-900 bg-white hover:bg-indigo-50 border border-indigo-200 px-3 py-1.5 rounded-xl transition-all shadow-2xs cursor-pointer shrink-0"
+                  className="text-xs font-bold text-[#8C3A27] hover:text-[#783020] bg-[#FDFBF7] hover:bg-[#F5EFE6] border border-[#EADFCB] px-3 py-1.5 rounded-xl transition-all shadow-2xs cursor-pointer shrink-0"
                 >
                   หยุดโหลดต่อ
                 </button>
@@ -1451,28 +1451,28 @@ const renderDateCheckbox = (s: string) => {
             return (
               <section
                 key={dateSheet}
-                className="bg-white rounded-3xl border border-slate-200/60 shadow-xs overflow-hidden mb-6"
+                className="bg-[#FDFBF7] rounded-3xl border border-[#E6E1D7] shadow-xs overflow-hidden mb-6"
               >
                 {/* Date Group Header */}
-                <div className="bg-linear-to-r from-slate-50/90 via-indigo-50/20 to-slate-50/90 px-5 py-3.5 border-b border-slate-200/60 flex items-center justify-between flex-wrap gap-2">
+                <div className="bg-[#FAF8F4] px-5 py-3.5 border-b border-[#EAE5DC] flex items-center justify-between flex-wrap gap-2">
                   <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-xl bg-indigo-100/70 text-indigo-700 flex items-center justify-center shadow-2xs">
+                    <div className="w-8 h-8 rounded-xl bg-[#F5EFE6] text-[#8C3A27] flex items-center justify-center shadow-2xs">
                       <Calendar className="w-4 h-4" />
                     </div>
                     <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="text-sm font-bold text-slate-800">
+                      <h3 className="text-sm font-bold text-[#2D2A26]">
                         งานประจำวันที่
                       </h3>
-                      <span className="text-xs text-indigo-700 font-extrabold bg-indigo-50 px-2.5 py-0.5 rounded-full border border-indigo-200/70">
+                      <span className="text-xs text-[#8C6228] font-extrabold bg-[#FAF4EB] px-2.5 py-0.5 rounded-full border border-[#EADFCB]">
                         {dateSheet}
                       </span>
-                      <span className="text-xs bg-slate-100 text-slate-600 font-bold px-2 py-0.5 rounded-full">
+                      <span className="text-xs bg-[#F5EFE6] text-[#7A7368] font-bold px-2 py-0.5 rounded-full">
                         {dateTasks.length} รายการ
                       </span>
                     </div>
                   </div>
 
-                  <span className="text-[11px] text-slate-400 font-mono">
+                  <span className="text-[11px] text-[#A8A196] font-mono">
                     แถว #{dateTasks[0]?.row} - #{dateTasks[dateTasks.length - 1]?.row}
                   </span>
                 </div>
@@ -1481,7 +1481,7 @@ const renderDateCheckbox = (s: string) => {
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
-                      <tr className="bg-slate-50/70 border-b border-slate-200/60 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                      <tr className="bg-[#F8F6F1] border-b border-[#EAE5DC] text-[11px] font-bold text-[#7A7368] uppercase tracking-wider">
                         <th className="py-3 px-4 w-12 text-center">เลือก</th>
                         <th className="py-3 px-3 w-16 text-center">แถว</th>
                         <th className="py-3 px-4 w-36">หมวดหมู่</th>
@@ -1492,17 +1492,17 @@ const renderDateCheckbox = (s: string) => {
                         <th className="py-3 px-3 text-center min-w-[210px] w-56">ลิงก์โฟลเดอร์ (TH & INTER)</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100 text-sm">
+                    <tbody className="divide-y divide-[#EFEBE4] text-sm">
                       {dateTasks.map((task) => {
                         const key = getTaskKey(task.sheetName, task.row);
                         const isSelected = selectedTaskKeys.includes(key);
                         const isSyncingThis = syncingTaskKeys.includes(key);
                         const isJustCompleted = justCompletedKeys.has(key);
                         const catStyle = CATEGORY_COLORS[task.category] || {
-                          bg: "bg-slate-100",
-                          text: "text-slate-700",
-                          border: "border-slate-200",
-                          dot: "bg-slate-400",
+                          bg: "bg-[#F5EFE6]",
+                          text: "text-[#5E513F]",
+                          border: "border-[#DED4C3]",
+                          dot: "bg-[#8C6228]",
                         };
 
                         return (
@@ -1511,31 +1511,31 @@ const renderDateCheckbox = (s: string) => {
                             onClick={() => toggleSelectTask(key)}
                             className={`transition-colors ${
                               isSyncingThis
-                                ? "bg-indigo-50/70 animate-pulse ring-1 ring-indigo-200"
+                                ? "bg-[#F8EFEA] animate-pulse ring-1 ring-[#EACEC3]"
                                 : isJustCompleted
-                                ? "bg-emerald-50/30 hover:bg-emerald-50/50"
+                                ? "bg-[#EFF5F0]/60 hover:bg-[#EFF5F0]"
                                 : isSelected
-                                ? "bg-indigo-50/40"
-                                : "hover:bg-indigo-50/20 cursor-pointer"
+                                ? "bg-[#F5EFE6]/80"
+                                : "hover:bg-[#FAF8F3] cursor-pointer"
                             }`}
                           >
                             <td className="py-3.5 px-4 text-center" onClick={(e) => e.stopPropagation()}>
                               {isSyncingThis ? (
-                                <Loader2 className="w-5 h-5 text-indigo-600 animate-spin mx-auto" />
+                                <Loader2 className="w-5 h-5 text-[#8C3A27] animate-spin mx-auto" />
                               ) : (
                                 <button
                                   onClick={() => toggleSelectTask(key)}
-                                  className="text-indigo-600 focus:outline-hidden transition-transform active:scale-90"
+                                  className="text-[#8C3A27] focus:outline-hidden transition-transform active:scale-90"
                                 >
                                   {isSelected ? (
-                                    <CheckSquare className="w-5 h-5 text-indigo-600" />
+                                    <CheckSquare className="w-5 h-5 text-[#8C3A27]" />
                                   ) : (
-                                    <Square className="w-5 h-5 text-slate-300 hover:text-indigo-400 transition-colors" />
+                                    <Square className="w-5 h-5 text-[#C8C2B7] hover:text-[#8C3A27] transition-colors" />
                                   )}
                                 </button>
                               )}
                             </td>
-                            <td className="py-3.5 px-3 text-center text-xs font-mono text-slate-400">
+                            <td className="py-3.5 px-3 text-center text-xs font-mono text-[#A8A196]">
                               #{task.row}
                             </td>
                             <td className="py-3.5 px-4">
@@ -1564,19 +1564,19 @@ const renderDateCheckbox = (s: string) => {
                                       href={targetUrl}
                                       target="_blank"
                                       rel="noopener noreferrer"
-                                      className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-700 hover:text-indigo-900 bg-indigo-50/70 hover:bg-indigo-100 border border-indigo-200/70 px-2.5 py-1 rounded-xl transition-all shadow-2xs max-w-[210px] group"
+                                      className="inline-flex items-center gap-1.5 text-xs font-bold text-[#5E513F] hover:text-[#2D2A26] bg-[#F5EFE6] hover:bg-[#EAE3D6] border border-[#DED4C3] px-2.5 py-1 rounded-xl transition-all shadow-2xs max-w-[210px] group"
                                       title={`คลิกเปิดใบบรีฟ Google Slides: ${titleText}`}
                                     >
-                                      <ExternalLink className="w-3 h-3 text-indigo-500 group-hover:text-indigo-700 shrink-0" />
+                                      <ExternalLink className="w-3 h-3 text-[#8C3A27] group-hover:text-[#783020] shrink-0" />
                                       <span className="truncate">{titleText}</span>
                                     </a>
                                   );
                                 }
 
-                                return <span className="text-xs text-slate-400">-</span>;
+                                return <span className="text-xs text-[#C8C2B7]">-</span>;
                               })()}
                             </td>
-                            <td className="py-3.5 px-3 text-center font-mono font-bold text-slate-700">
+                            <td className="py-3.5 px-3 text-center font-mono font-bold text-[#2D2A26]">
                               {task.no || "-"}
                             </td>
                             <td className="py-3.5 px-4" onClick={(e) => e.stopPropagation()}>
@@ -1592,26 +1592,26 @@ const renderDateCheckbox = (s: string) => {
                                       }));
                                     }}
                                     placeholder="พิมพ์ชื่องาน/ชื่อโฟลเดอร์..."
-                                    className="w-full px-3 py-1.5 text-xs font-medium bg-slate-50/80 hover:bg-slate-50 border border-slate-200/80 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-all pr-7 text-slate-800"
+                                    className="w-full px-3 py-1.5 text-xs font-medium bg-[#F7F5EF] hover:bg-white border border-[#E2DDD2] rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-[#8C3A27]/10 focus:border-[#8C3A27] transition-all pr-7 text-[#2D2A26] placeholder-[#A8A196]"
                                   />
-                                  <Edit3 className="w-3.5 h-3.5 text-slate-300 absolute right-2.5 top-2 pointer-events-none" />
+                                  <Edit3 className="w-3.5 h-3.5 text-[#C8C2B7] absolute right-2.5 top-2 pointer-events-none" />
                                 </div>
                               </div>
                             </td>
                             <td className="py-3.5 px-3 text-center whitespace-nowrap">
                               {isSyncingThis ? (
-                                <span className="inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-2xs">
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0 text-indigo-600" />
+                                <span className="inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-[#F8EFEA] text-[#8C3A27] border border-[#EACEC3] shadow-2xs">
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0 text-[#8C3A27]" />
                                   <span>กำลังสร้าง...</span>
                                 </span>
                               ) : task.isCompleted ? (
-                                <span className="inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-emerald-50 text-emerald-700 border border-emerald-200/80 shadow-2xs">
-                                  <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
+                                <span className="inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-[#EFF5F0] text-[#34603B] border border-[#D1E4D4] shadow-2xs">
+                                  <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-[#34603B]" />
                                   <span>เสร็จสิ้น</span>
                                 </span>
                               ) : (
-                                <span className="inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-amber-50 text-amber-700 border border-amber-200/80 shadow-2xs">
-                                  <Clock className="w-3.5 h-3.5 shrink-0 text-amber-600" />
+                                <span className="inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-[#FAF4EB] text-[#8C6228] border border-[#EADFCB] shadow-2xs">
+                                  <Clock className="w-3.5 h-3.5 shrink-0 text-[#8C6228]" />
                                   <span>{cleanStatus(task.status) || "กำลังทำ"}</span>
                                 </span>
                               )}
@@ -1625,8 +1625,8 @@ const renderDateCheckbox = (s: string) => {
 
                                 if (isSyncingThis) {
                                   return (
-                                    <span className="inline-flex items-center justify-center gap-1.5 text-xs font-bold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-xl border border-indigo-200 shadow-2xs">
-                                      <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600 shrink-0" />
+                                    <span className="inline-flex items-center justify-center gap-1.5 text-xs font-bold text-[#8C3A27] bg-[#F8EFEA] px-2.5 py-1 rounded-xl border border-[#EACEC3] shadow-2xs">
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin text-[#8C3A27] shrink-0" />
                                       <span>กำลังสร้างโฟลเดอร์...</span>
                                     </span>
                                   );
@@ -1635,14 +1635,14 @@ const renderDateCheckbox = (s: string) => {
                                 if (!thUrl && !interUrl) {
                                   if (task.isCompleted) {
                                     return (
-                                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50/80 px-2.5 py-1 rounded-xl border border-emerald-200/70">
-                                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#34603B] bg-[#EFF5F0] px-2.5 py-1 rounded-xl border border-[#D1E4D4]">
+                                        <CheckCircle2 className="w-3.5 h-3.5 text-[#34603B]" />
                                         <span>เสร็จสิ้น (ยังไม่มีลิงก์)</span>
                                       </span>
                                     );
                                   }
                                   return (
-                                    <span className="text-xs text-slate-400 italic">รอสร้างโฟลเดอร์</span>
+                                    <span className="text-xs text-[#A8A196] italic">รอสร้างโฟลเดอร์</span>
                                   );
                                 }
 
@@ -1653,11 +1653,11 @@ const renderDateCheckbox = (s: string) => {
                                         href={thUrl}
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 px-2.5 py-1 rounded-xl transition-all shadow-2xs hover:scale-102 active:scale-98 group whitespace-nowrap"
+                                        className="inline-flex items-center gap-1 text-[11px] font-bold text-[#34603B] hover:text-[#234428] bg-[#EFF5F0] hover:bg-[#E3EFE5] border border-[#D1E4D4] px-2.5 py-1 rounded-xl transition-all shadow-2xs hover:scale-102 active:scale-98 group whitespace-nowrap"
                                         title="คลิกเพื่อเปิดโฟลเดอร์ Google Drive (TH)"
                                       >
                                         <span>เปิด TH</span>
-                                        <ExternalLink className="w-3 h-3 text-emerald-500 group-hover:text-emerald-700 shrink-0" />
+                                        <ExternalLink className="w-3 h-3 text-[#34603B] group-hover:text-[#234428] shrink-0" />
                                       </a>
                                     ) : null}
 
@@ -1666,11 +1666,11 @@ const renderDateCheckbox = (s: string) => {
                                         href={interUrl}
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        className="inline-flex items-center gap-1 text-[11px] font-bold text-sky-700 hover:text-sky-900 bg-sky-50 hover:bg-sky-100 border border-sky-200/80 px-2.5 py-1 rounded-xl transition-all shadow-2xs hover:scale-102 active:scale-98 group whitespace-nowrap"
+                                        className="inline-flex items-center gap-1 text-[11px] font-bold text-[#334E6F] hover:text-[#20344D] bg-[#EFF3F8] hover:bg-[#E2EBF5] border border-[#CDDAE8] px-2.5 py-1 rounded-xl transition-all shadow-2xs hover:scale-102 active:scale-98 group whitespace-nowrap"
                                         title="คลิกเพื่อเปิดโฟลเดอร์ Google Drive (INTER)"
                                       >
                                         <span>เปิด INTER</span>
-                                        <ExternalLink className="w-3 h-3 text-sky-500 group-hover:text-sky-700 shrink-0" />
+                                        <ExternalLink className="w-3 h-3 text-[#334E6F] group-hover:text-[#20344D] shrink-0" />
                                       </a>
                                     ) : null}
                                   </div>
@@ -1691,25 +1691,25 @@ const renderDateCheckbox = (s: string) => {
       </main>
 
       {/* Modern Floating Bottom Action Bar */}
-      <aside className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 w-[95%] max-w-3xl bg-white/90 backdrop-blur-md border border-slate-200/80 py-2.5 px-4 rounded-2xl shadow-xl shadow-slate-900/10 transition-all">
+      <aside className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 w-[95%] max-w-3xl bg-[#FDFBF7]/95 backdrop-blur-md border border-[#E6E1D7] py-2.5 px-4 rounded-2xl shadow-xl shadow-[#2D2A26]/5 transition-all">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2.5">
             <button
               onClick={handleSelectAllPending}
-              className="px-3 py-1.5 text-xs font-bold text-slate-700 bg-slate-100/90 hover:bg-slate-200/80 active:scale-95 rounded-xl transition-all inline-flex items-center gap-1.5 cursor-pointer"
+              className="px-3 py-1.5 text-xs font-bold text-[#5E513F] bg-[#F5EFE6] hover:bg-[#EAE3D6] active:scale-95 rounded-xl border border-[#DED4C3] transition-all inline-flex items-center gap-1.5 cursor-pointer"
             >
-              <CheckSquare className="w-3.5 h-3.5 text-slate-500" />
+              <CheckSquare className="w-3.5 h-3.5 text-[#8C3A27]" />
               <span>เลือกงานที่ยังไม่เสร็จ</span>
             </button>
-            <span className="text-xs text-slate-600 font-medium">
-              เลือกไว้ <span className="bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-full font-black text-xs">{selectedTaskKeys.length}</span> งาน
+            <span className="text-xs text-[#7A7368] font-medium">
+              เลือกไว้ <span className="bg-[#FAF4EB] text-[#8C6228] border border-[#EADFCB] px-2 py-0.5 rounded-full font-black text-xs">{selectedTaskKeys.length}</span> งาน
             </span>
           </div>
 
           <button
             onClick={handleSyncFolders}
             disabled={isSyncing || selectedTaskKeys.length === 0}
-            className="inline-flex items-center justify-center gap-2 px-5 py-2 text-xs sm:text-sm font-bold text-white bg-linear-to-r from-indigo-600 via-indigo-500 to-violet-600 hover:from-indigo-700 hover:to-violet-700 active:scale-[0.98] rounded-xl shadow-sm shadow-indigo-200 disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer"
+            className="inline-flex items-center justify-center gap-2 px-5 py-2 text-xs sm:text-sm font-bold text-[#FDFCFB] bg-[#8C3A27] hover:bg-[#783020] active:scale-[0.98] rounded-xl shadow-sm shadow-[#8C3A27]/20 disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer"
           >
             {isSyncing ? (
               <>
@@ -1718,7 +1718,7 @@ const renderDateCheckbox = (s: string) => {
               </>
             ) : (
               <>
-                <Sparkles className="w-4 h-4 text-indigo-200" />
+                <Sparkles className="w-4 h-4 text-[#F5C4B8]" />
                 <span>สร้างโฟลเดอร์ TH & INTER ({selectedTaskKeys.length} งาน)</span>
               </>
             )}
@@ -1728,41 +1728,41 @@ const renderDateCheckbox = (s: string) => {
 
       {/* Guide Modal */}
       {showGuide && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-              <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
+        <div className="fixed inset-0 bg-[#2D2A26]/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-[#FDFBF7] rounded-3xl max-w-2xl w-full p-6 shadow-2xl border border-[#E6E1D7] max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-[#EFEBE4] pb-4">
+              <h3 className="text-lg font-bold text-[#2D2A26] flex items-center gap-2">
+                <FileSpreadsheet className="w-5 h-5 text-[#34603B]" />
                 <span>วิธีอัปเดตสคริปต์ใน Google Sheets (เวอร์ชันล่าสุด)</span>
               </h3>
               <button
                 onClick={() => setShowGuide(false)}
-                className="text-slate-400 hover:text-slate-600 text-sm font-bold px-2 py-1"
+                className="text-[#A8A196] hover:text-[#2D2A26] text-sm font-bold px-2 py-1 cursor-pointer"
               >
                 ปิด
               </button>
             </div>
 
-            <div className="py-4 space-y-4 text-sm text-slate-600">
+            <div className="py-4 space-y-4 text-sm text-[#5E513F]">
               <div className="flex gap-3">
-                <span className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center shrink-0 text-xs">
+                <span className="w-6 h-6 rounded-full bg-[#F5EFE6] text-[#8C3A27] border border-[#DED4C3] font-bold flex items-center justify-center shrink-0 text-xs">
                   1
                 </span>
                 <div>
-                  <p className="font-semibold text-slate-800">คัดลอกโค้ดเวอร์ชันล่าสุด</p>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    คัดลอกโค้ดในไฟล์ <code className="bg-slate-100 text-indigo-600 px-1.5 py-0.5 rounded font-mono">google-apps-script/Code.gs</code> ไปวางในหน้า Apps Script ของ Google Sheets
+                  <p className="font-semibold text-[#2D2A26]">คัดลอกโค้ดเวอร์ชันล่าสุด</p>
+                  <p className="text-xs text-[#7A7368] mt-0.5">
+                    คัดลอกโค้ดในไฟล์ <code className="bg-[#F5EFE6] text-[#8C3A27] px-1.5 py-0.5 rounded font-mono border border-[#DED4C3]">google-apps-script/Code.gs</code> ไปวางในหน้า Apps Script ของ Google Sheets
                   </p>
                 </div>
               </div>
 
               <div className="flex gap-3">
-                <span className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center shrink-0 text-xs">
+                <span className="w-6 h-6 rounded-full bg-[#F5EFE6] text-[#8C3A27] border border-[#DED4C3] font-bold flex items-center justify-center shrink-0 text-xs">
                   2
                 </span>
                 <div>
-                  <p className="font-semibold text-slate-800">กด Manage deployments และแก้ไข</p>
-                  <p className="text-xs text-slate-500 mt-0.5">
+                  <p className="font-semibold text-[#2D2A26]">กด Manage deployments และแก้ไข</p>
+                  <p className="text-xs text-[#7A7368] mt-0.5">
                     กด <b>Deploy (นำไปใช้งาน)</b> &gt; <b>Manage deployments (จัดการการนำไปใช้งาน)</b> &gt; กดไอคอน <b>ดินสอ (Edit)</b>
                     <br />
                     - Version: เลือก <b>New version (เวอร์ชันใหม่)</b>
@@ -1775,10 +1775,10 @@ const renderDateCheckbox = (s: string) => {
               </div>
             </div>
 
-            <div className="border-t border-slate-100 pt-4 flex justify-end">
+            <div className="border-t border-[#EFEBE4] pt-4 flex justify-end">
               <button
                 onClick={() => setShowGuide(false)}
-                className="px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-xl transition-colors"
+                className="px-4 py-2 text-xs font-semibold text-white bg-[#2D2A26] hover:bg-[#403C37] rounded-xl transition-colors cursor-pointer"
               >
                 เข้าใจแล้ว
               </button>
