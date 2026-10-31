@@ -785,53 +785,6 @@ const renderDateCheckbox = (s: string) => {
 
         {/* Filter Controls Card */}
         <section className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs relative">
-          {/* Quick Month Switcher */}
-          <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-1.5 border-b border-slate-100">
-            <span className="text-xs font-bold text-slate-500 shrink-0 flex items-center gap-1">
-              <Calendar className="w-3.5 h-3.5 text-indigo-600" />
-              <span>เลือกดูงานตามเดือน:</span>
-            </span>
-            <button
-              type="button"
-              onClick={() => handleSelectPreset("all")}
-              className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-                selectedSheets.includes("ALL") || (availableSheets.length > 0 && selectedSheets.length === availableSheets.length)
-                  ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs"
-                  : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
-              }`}
-            >
-              ทุกเดือน ({availableSheets.length > 0 ? availableSheets.length : 52} วัน)
-            </button>
-            <button
-              type="button"
-              onClick={() => handleSelectPreset("nov")}
-              className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-                !selectedSheets.includes("ALL") &&
-                monthGroups.nov.length > 0 &&
-                monthGroups.nov.every((s) => selectedSheets.includes(s)) &&
-                selectedSheets.length === monthGroups.nov.length
-                  ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs"
-                  : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
-              }`}
-            >
-              เดือน พ.ย. ({monthGroups.nov.length} วัน)
-            </button>
-            <button
-              type="button"
-              onClick={() => handleSelectPreset("oct")}
-              className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-                !selectedSheets.includes("ALL") &&
-                monthGroups.oct.length > 0 &&
-                monthGroups.oct.every((s) => selectedSheets.includes(s)) &&
-                selectedSheets.length === monthGroups.oct.length
-                  ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs"
-                  : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
-              }`}
-            >
-              เดือน ต.ค. ({monthGroups.oct.length} วัน)
-            </button>
-          </div>
-
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
             {/* 1. Staff Selector */}
             <div>
@@ -882,7 +835,7 @@ const renderDateCheckbox = (s: string) => {
               >
                 <span className="truncate pr-1">
                   {isMetadataLoading ? (
-                    <span className="text-slate-400">⏳ กำลังดึงวันที่...</span>
+                    <span className="text-slate-400">กำลังดึงวันที่...</span>
                   ) : selectedSheets.includes("ALL") ? (
                     <span className="text-indigo-700 font-bold">ทุกวันที่ (ALL)</span>
                   ) : selectedSheets.length === 0 ? (
@@ -989,7 +942,7 @@ const renderDateCheckbox = (s: string) => {
                   <div className="max-h-60 overflow-y-auto space-y-3 pr-1 border-t border-slate-100 pt-2">
                     {availableSheets.length === 0 ? (
                       <div className="py-4 text-center text-xs text-slate-400 italic">
-                        ⏳ กำลังดึงวันที่...
+                        กำลังดึงวันที่...
                       </div>
                     ) : (
                       <>
@@ -1070,16 +1023,18 @@ const renderDateCheckbox = (s: string) => {
                     <button
                       type="button"
                       onClick={() => {
-                        if (availableSheets.length > 0) {
-                          const reset = [availableSheets[0]];
-                          setSelectedSheets(reset);
-                          localStorage.setItem("gds_selectedSheets", JSON.stringify(reset));
-                          fetchTasks(assignee, reset);
+                        setSelectedSheets([]);
+                        localStorage.setItem("gds_selectedSheets", JSON.stringify([]));
+                        setTasks([]);
+                        setStreamingProgress(null);
+                        if (abortControllerRef.current) {
+                          abortControllerRef.current.abort();
                         }
+                        setIsLoading(false);
                       }}
                       className="text-[11px] text-slate-400 hover:text-rose-600 font-medium cursor-pointer transition-colors"
                     >
-                      รีเซ็ตวันล่าสุด
+                      ล้างการเลือก (ไม่เลือกวันใดเลย)
                     </button>
                     <button
                       type="button"
@@ -1310,6 +1265,43 @@ const renderDateCheckbox = (s: string) => {
             </div>
             <h4 className="text-base font-bold text-slate-800">กำลังค้นหางานจาก Google Sheets...</h4>
             <p className="text-xs text-slate-400 mt-1">กรุณารอสักครู่ ระบบกำลังดึงข้อมูลล่าสุด</p>
+          </section>
+        ) : selectedSheets.length === 0 ? (
+          <section className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-400 shadow-xs">
+            <Calendar className="w-10 h-10 mx-auto mb-2 text-slate-300" />
+            <h4 className="font-bold text-slate-700 text-base">
+              ยังไม่ได้เลือกวันที่
+            </h4>
+            <p className="text-xs text-slate-400 mt-1">
+              กรุณาคลิกเลือกวันที่ต้องการดูงานจากเมนูด้านบน หรือกดเลือกดูงานวันล่าสุด
+            </p>
+            <div className="mt-4 flex items-center justify-center gap-2 flex-wrap">
+              <button
+                onClick={() => {
+                  if (availableSheets.length > 0) {
+                    const latest = [availableSheets[0]];
+                    setSelectedSheets(latest);
+                    localStorage.setItem("gds_selectedSheets", JSON.stringify(latest));
+                    fetchTasks(assignee, latest, true);
+                  }
+                }}
+                className="px-3.5 py-1.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 text-xs font-semibold rounded-xl transition-all inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Calendar className="w-3.5 h-3.5" />
+                <span>เลือกวันล่าสุด ({availableSheets[0] || "วันล่าสุด"})</span>
+              </button>
+              <button
+                onClick={() => {
+                  setSelectedSheets(["ALL"]);
+                  localStorage.setItem("gds_selectedSheets", JSON.stringify(["ALL"]));
+                  fetchTasks(assignee, ["ALL"], true);
+                }}
+                className="px-3.5 py-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200 text-xs font-semibold rounded-xl transition-all inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Search className="w-3.5 h-3.5" />
+                <span>ดูทุกวันที่ (ALL)</span>
+              </button>
+            </div>
           </section>
         ) : Object.keys(groupedTasksByDate).length === 0 ? (
           pendingOnly && tasks.length > 0 && pendingTasks === 0 ? (
