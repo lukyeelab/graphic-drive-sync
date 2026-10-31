@@ -62,6 +62,75 @@ const CATEGORY_COLORS: Record<string, { bg: string; text: string; border: string
   Pretty: { bg: "bg-[#FF2D55]/10", text: "text-[#D0093A]", border: "border-[#FF2D55]/25", dot: "bg-[#FF2D55]" },
 };
 
+interface ThaiDayColor {
+  name: string;
+  short: string;
+  bg: string;
+  text: string;
+  border: string;
+  dot: string;
+}
+
+const THAI_DAY_OF_WEEK_COLORS: Record<number, ThaiDayColor> = {
+  0: { name: "วันอาทิตย์", short: "อา.", bg: "bg-[#FF3B30]/12", text: "text-[#D70015]", border: "border-[#FF3B30]/30", dot: "bg-[#FF3B30]" }, // อาทิตย์ - แดง
+  1: { name: "วันจันทร์", short: "จ.", bg: "bg-[#FFD60A]/20", text: "text-[#856404]", border: "border-[#FFD60A]/40", dot: "bg-[#FFCC00]" }, // จันทร์ - เหลือง
+  2: { name: "วันอังคาร", short: "อ.", bg: "bg-[#FF2D55]/12", text: "text-[#D0093A]", border: "border-[#FF2D55]/30", dot: "bg-[#FF2D55]" }, // อังคาร - ชมพู
+  3: { name: "วันพุธ", short: "พ.", bg: "bg-[#34C759]/12", text: "text-[#248A3D]", border: "border-[#34C759]/30", dot: "bg-[#34C759]" }, // พุธ - เขียว
+  4: { name: "วันพฤหัสบดี", short: "พฤ.", bg: "bg-[#FF9500]/12", text: "text-[#C97700]", border: "border-[#FF9500]/30", dot: "bg-[#FF9500]" }, // พฤหัส - ส้ม
+  5: { name: "วันศุกร์", short: "ศ.", bg: "bg-[#007AFF]/12", text: "text-[#0066D6]", border: "border-[#007AFF]/30", dot: "bg-[#007AFF]" }, // ศุกร์ - ฟ้า
+  6: { name: "วันเสาร์", short: "ส.", bg: "bg-[#AF52DE]/12", text: "text-[#8932B8]", border: "border-[#AF52DE]/30", dot: "bg-[#AF52DE]" }, // เสาร์ - ม่วง
+};
+
+function getThaiDayOfWeekInfo(dateStr: string): ThaiDayColor | null {
+  if (!dateStr || typeof dateStr !== "string") return null;
+  const str = dateStr.trim();
+  if (!str || str === "-") return null;
+
+  const slashMatch = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
+  if (slashMatch) {
+    const day = parseInt(slashMatch[1], 10);
+    const month = parseInt(slashMatch[2], 10);
+    let year = parseInt(slashMatch[3], 10);
+
+    if (year < 100) {
+      if (year >= 60 && year <= 99) {
+        year = 2500 + year - 543;
+      } else {
+        year = 2000 + year;
+      }
+    } else if (year > 2500) {
+      year = year - 543;
+    }
+
+    const d = new Date(year, month - 1, day);
+    if (!isNaN(d.getTime())) {
+      const dayIndex = d.getDay();
+      return THAI_DAY_OF_WEEK_COLORS[dayIndex] || null;
+    }
+  }
+
+  const isoMatch = str.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+  if (isoMatch) {
+    let year = parseInt(isoMatch[1], 10);
+    const month = parseInt(isoMatch[2], 10);
+    const day = parseInt(isoMatch[3], 10);
+    if (year > 2500) year -= 543;
+    const d = new Date(year, month - 1, day);
+    if (!isNaN(d.getTime())) {
+      const dayIndex = d.getDay();
+      return THAI_DAY_OF_WEEK_COLORS[dayIndex] || null;
+    }
+  }
+
+  const parsed = new Date(str);
+  if (!isNaN(parsed.getTime())) {
+    const dayIndex = parsed.getDay();
+    return THAI_DAY_OF_WEEK_COLORS[dayIndex] || null;
+  }
+
+  return null;
+}
+
 export default function HomePage() {
   const [assignee, setAssignee] = useState<string>("ลูกหยี");
   const [selectedSheets, setSelectedSheets] = useState<string[]>([]);
@@ -974,7 +1043,7 @@ export default function HomePage() {
     <div className="min-h-screen bg-[#F2F2F7] flex flex-col font-sans pb-32">
       {/* iOS 18 Frosted Glass Header */}
       <header className="bg-[#F2F2F7]/80 backdrop-blur-2xl border-b border-black/[0.06] sticky top-0 z-30 transition-all">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+        <div className="max-w-[1720px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-[12px] bg-gradient-to-b from-[#1C1C1E] to-[#000000] flex items-center justify-center text-white shadow-xs ring-1 ring-black/5">
               <FolderPlus className="w-5 h-5 text-white" />
@@ -1029,7 +1098,7 @@ export default function HomePage() {
       </header>
 
       {/* Main Container */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full flex flex-col gap-6">
+      <main className="max-w-[1720px] mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full flex flex-col gap-6">
         {/* Error Alert Box */}
         {errorMessage && (
           <div className="bg-[#FF3B30]/10 border border-[#FF3B30]/20 rounded-2xl p-4 flex items-start gap-3">
@@ -1611,10 +1680,10 @@ export default function HomePage() {
                         <th className="py-3.5 px-4 w-12 text-center text-[#8E8E93]">เลือก</th>
                         <th className="py-3.5 px-3 w-16 text-center text-[#8E8E93]">แถว</th>
                         <th className="py-3.5 px-4 w-36 text-[#8E8E93]">หมวดหมู่</th>
-                        <th className="py-3.5 px-4 w-44 text-[#8E8E93]">ใบบรีฟ</th>
+                        <th className="py-3.5 px-4 min-w-[190px] w-52 text-[#8E8E93]">ใบบรีฟ</th>
                         <th className="py-3.5 px-3 w-16 text-center text-[#8E8E93]">No.</th>
-                        <th className="py-3.5 px-4 text-[#8E8E93]">ชื่องาน/ชื่อโฟลเดอร์ (สำหรับสร้างโฟลเดอร์ TH)</th>
-                        <th className="py-3.5 px-3 text-center min-w-[110px] w-28 whitespace-nowrap text-[#8E8E93]">วันที่จ่ายงาน</th>
+                        <th className="py-3.5 px-4 text-[#8E8E93]">ชื่องาน/ชื่อโฟลเดอร์ (TH)</th>
+                        <th className="py-3.5 px-3 text-center min-w-[140px] w-40 whitespace-nowrap text-[#8E8E93]">วันที่จ่ายงาน</th>
                         <th className="py-3.5 px-3 text-center min-w-[110px] w-28 whitespace-nowrap text-[#8E8E93]">สถานะ</th>
                         <th className="py-3.5 px-3 text-center min-w-[210px] w-56 text-[#8E8E93]">ลิงก์โฟลเดอร์ (TH & INTER)</th>
                       </tr>
@@ -1691,7 +1760,7 @@ export default function HomePage() {
                                       href={targetUrl}
                                       target="_blank"
                                       rel="noopener noreferrer"
-                                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#007AFF] hover:text-[#0066D6] bg-[#007AFF]/10 hover:bg-[#007AFF]/15 border border-[#007AFF]/20 px-2.5 py-1 rounded-xl transition-all shadow-2xs max-w-[210px] group"
+                                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#007AFF] hover:text-[#0066D6] bg-[#007AFF]/10 hover:bg-[#007AFF]/15 border border-[#007AFF]/20 px-2.5 py-1 rounded-xl transition-all shadow-2xs max-w-[320px] group"
                                       title={`คลิกเปิดใบบรีฟ Google Slides: ${titleText}`}
                                     >
                                       <ExternalLink className="w-3 h-3 text-[#007AFF] group-hover:text-[#0066D6] shrink-0" />
@@ -1746,9 +1815,22 @@ export default function HomePage() {
                                 if (!rawDate || rawDate === "-") {
                                   return <span className="text-xs text-[#8E8E93]">-</span>;
                                 }
+                                const dayInfo = getThaiDayOfWeekInfo(rawDate);
+                                if (dayInfo) {
+                                  return (
+                                    <span
+                                      className={`inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${dayInfo.bg} ${dayInfo.text} ${dayInfo.border} shadow-2xs`}
+                                      title={`วันที่จ่ายงาน (Col K): ${dayInfo.name} ที่ ${rawDate}`}
+                                    >
+                                      <span className={`w-1.5 h-1.5 rounded-full ${dayInfo.dot} shrink-0`} />
+                                      <span className="font-bold">{dayInfo.short}</span>
+                                      <span className="font-mono">{rawDate}</span>
+                                    </span>
+                                  );
+                                }
                                 return (
                                   <span
-                                    className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-mono font-medium text-[#1C1C1E] bg-[#F2F2F7] border border-black/[0.06] shadow-2xs"
+                                    className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-mono font-medium text-[#1C1C1E] bg-[#F2F2F7] border border-black/[0.06] shadow-2xs"
                                     title={`วันที่จ่ายงาน (Col K): ${rawDate}`}
                                   >
                                     <Calendar className="w-3 h-3 text-[#007AFF] shrink-0" />
@@ -1872,7 +1954,7 @@ export default function HomePage() {
       </main>
 
       {/* iOS 18 Dynamic Island Floating Dock */}
-      <aside className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 w-[95%] max-w-2xl bg-[#000000]/90 backdrop-blur-2xl border border-white/15 py-2.5 px-4 rounded-full shadow-[0_20px_50px_rgba(0,0,0,0.4)] text-white transition-all ring-1 ring-white/10">
+      <aside className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 w-[95%] max-w-3xl bg-[#000000]/90 backdrop-blur-2xl border border-white/15 py-2.5 px-4 rounded-full shadow-[0_20px_50px_rgba(0,0,0,0.4)] text-white transition-all ring-1 ring-white/10">
         {isSyncing ? (
           // สถานะกำลังส่งคำขอสร้างโฟลเดอร์ (มีปุ่มยกเลิกการส่งคำขอ)
           <div className="flex items-center justify-between flex-wrap gap-2 w-full">
