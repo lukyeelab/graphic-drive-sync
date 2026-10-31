@@ -947,15 +947,14 @@ function getSheetSmartChipsMap(spreadsheetId, sheetName, lastRow) {
 function isInterMonthlyFolderName(name) {
   if (!name || typeof name !== "string") return false;
   const n = name.toUpperCase().trim();
-  // หากมีคำว่า "ใบขาย", "เดือน" หรือขึ้นต้นด้วย "TH" หรือมีเดือนภาษาไทย ให้ถือเป็น TH แน่นอน
-  if (n.includes("ใบขาย") || n.includes("เดือน") || /^(TH\s|TH_)/i.test(n)) return false;
-  if (/(ม\.?ค\.?|ก\.?พ\.?|มี\.?ค\.?|เม\.?ย\.?|พ\.?ค\.?|มิ\.?ย\.?|ก\.?ค\.?|ส\.?ค\.?|ก\.?ย\.?|ต\.?ค\.?|พ\.?ย\.?|ธ\.?ค\.?)/.test(n) && !n.includes("INTER")) return false;
+  // หากมีตัวอักษรภาษาไทยใดๆ (เช่น ใบขาย, พ.ย., ต.ค., เดือน ฯลฯ) -> ถือเป็นฝั่ง TH 100% ไม่ใช่ INTER แน่นอน
+  if (/[ก-๙]/.test(n)) return false;
 
   if (n.includes("INTER")) return true;
   if (/^M\d{1,2}$/i.test(n) || /^INTER\s*M\d{1,2}$/i.test(n)) return true; // เช่น M11, INTER M11
-  if (/^\[\d{1,2}\]/.test(n)) return true; // เช่น [11] NOV 2026, [11] NOV
+  if (/^\[\d{1,2}\]/.test(n)) return true; // เช่น [11] NOV 2026, [10] OCT 2026
   if (/^\d{1,2}\s*[-/]?\s*(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)/i.test(n)) return true; // เช่น 11 NOV 2026
-  if (/^(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)/i.test(n)) return true; // เช่น NOV 2026
+  if (/^(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)/i.test(n)) return true; // เช่น NOV 2026, OCT 2026
   return false;
 }
 
@@ -966,10 +965,9 @@ function isThMonthlyFolderName(name) {
   if (!name || typeof name !== "string") return false;
   const n = name.toUpperCase().trim();
   if (n.includes("INTER")) return false; // ถ้ามีคำว่า INTER ไม่ใช่ TH แน่นอน
-  if (n.includes("ใบขาย")) return true; // เช่น "TH ใบขาย พ.ย. NOV 69", "ใบขาย พ.ย. NOV 69"
-  if (n.includes("เดือน")) return true; // เช่น "เดือน 11", "TH เดือน 11"
+  // หากมีตัวอักษรภาษาไทยใดๆ (เช่น ใบขาย, พ.ย., ต.ค., เดือน, ตุลาคม ฯลฯ) -> เป็น TH 100%
+  if (/[ก-๙]/.test(n)) return true;
   if (/\bTH\b/i.test(n) || n.startsWith("TH ") || n.endsWith(" TH")) return true;
-  if (/(ม\.?ค\.?|ก\.?พ\.?|มี\.?ค\.?|เม\.?ย\.?|พ\.?ค\.?|มิ\.?ย\.?|ก\.?ค\.?|ส\.?ค\.?|ก\.?ย\.?|ต\.?ค\.?|พ\.?ย\.?|ธ\.?ค\.?)/.test(n)) return true;
   return false;
 }
 
