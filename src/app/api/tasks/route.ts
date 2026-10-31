@@ -179,34 +179,45 @@ export async function GET(req: NextRequest) {
 
     // กรณีดึงรายการงาน (action=getTasks)
     const isForce = searchParams.get("force") === "true";
-    const cacheKey = `tasks_${sheet}_${assignee || "ALL"}_${pendingOnly}`;
+    const sheetParam = sheet || "ALL";
+    const requestedSheets = sheetParam
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    const cacheKey = `tasks_${requestedSheets.sort().join(",")}_${assignee || "ALL"}_${pendingOnly}`;
     const cachedEntry = serverTasksCache.get(cacheKey);
 
     if (!isForce && cachedEntry && Date.now() - cachedEntry.timestamp < CACHE_TTL_MS) {
       return NextResponse.json(cachedEntry.data);
     }
 
-    const targetUrl = new URL(gasUrl);
-    targetUrl.searchParams.set("action", action);
-    targetUrl.searchParams.set("sheet", sheet);
-    targetUrl.searchParams.set("assignee", assignee);
-    targetUrl.searchParams.set("pendingOnly", "false"); // ดึงทั้งเสร็จและไม่เสร็จเสมอ เพื่อให้สลับดูได้ใน 0ms
+    let allRawTasks: any[] = [];
+    let isSuccess = false;
 
-    const res = await fetch(targetUrl.toString(), {
-      method: "GET",
-      headers: { Accept: "application/json" },
-      redirect: "follow",
-      cache: "no-store",
-    });
+    // 1. กรณีเลือก "ALL" หรือไม่ได้ระบุ
+    if (requestedSheets.includes("ALL") || requestedSheets.length === 0) {
+      const targetUrl = new URL(gasUrl);
+      targetUrl.searchParams.set("action", action);
+      targetUrl.searchParams.set("sheet", "ALL");
+      targetUrl.searchParams.set("assignee", assignee);
+      targetUrl.searchParams.set("pendingOnly", "false");
 
-    const responseText = await res.text();
+      const res = await fetch(targetUrl.toString(), {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        redirect: "follow",
+        cache: "no-store",
+      });
 
-    try {
-      const data = JSON.parse(responseText);
-      if (data && data.success && Array.isArray(data.tasks)) {
-        // Fallback อัจฉริยะ: หากเลือก sheet=ALL แต่ GAS ยังส่งมาไม่ครบทุกแผ่นงาน
-        // Next.js จะดึงแผ่นงาน พ.ย. อื่นๆ ที่มีงาน (เช่น 7 พย, 8 พย, 6 พย, 3 พย, 2 พย, 1 พย) มาผสานรวมให้ทันที
-        if (sheet === "ALL") {
+      const responseText = await res.text();
+      try {
+        const data = JSON.parse(responseText);
+        if (data && data.success && Array.isArray(data.tasks)) {
+          allRawTasks = data.tasks;
+          isSuccess = true;
+
+          // Fallback อัจฉริยะ: ดึงแผ่นงาน พ.ย. อื่นๆ ที่อาจยังไม่อยู่ในแคชของ GAS
           const scannedSheets = new Set(data.tasks.map((t: any) => t.sheetName));
           const prioritySheets = ["11 พย", "8 พย", "7 พย", "6 พย", "3 พย", "2 พย", "1 พย"].filter(
             (s) => !scannedSheets.has(s)
@@ -232,80 +243,156 @@ export async function GET(req: NextRequest) {
 
             for (const batch of extraBatches) {
               if (Array.isArray(batch) && batch.length > 0) {
-                data.tasks.push(...batch);
+                allRawTasks.push(...batch);
               }
             }
           }
         }
-
-        // กรองความซ้ำซ้อนของงานตาม sheetName และ row
-        const seenKeys = new Set<string>();
-        data.tasks = data.tasks.filter((t: any) => {
-          const key = `${t.sheetName}_${t.row}`;
-          if (seenKeys.has(key)) return false;
-          seenKeys.add(key);
-          return true;
-        });
-
-        data.tasks = data.tasks.map((t: any) => {
-          let briefLink = (t.briefLink || "").trim();
-          let briefTitle = (t.briefTitle || "").trim();
-
-          const isUrl = briefLink.startsWith("http://") || briefLink.startsWith("https://");
-          if (!isUrl && briefLink) {
-            if (!briefTitle) briefTitle = briefLink;
-            briefLink = `https://drive.google.com/drive/search?q=${encodeURIComponent(briefTitle)}`;
-          } else if (!briefLink && briefTitle) {
-            briefLink = `https://drive.google.com/drive/search?q=${encodeURIComponent(briefTitle)}`;
-          }
-
-          return {
-            ...t,
-            briefLink,
-            briefTitle: briefTitle || "เปิดใบบรีฟ",
-          };
-        });
-
-        // จัดเรียง: วันที่ล่าสุดขึ้นก่อน และงานที่ยังไม่เสร็จขึ้นก่อน
-        data.tasks.sort((a: any, b: any) => {
-          if (a.isCompleted !== b.isCompleted) {
-            return a.isCompleted ? 1 : -1;
-          }
-          return (b.row || 0) - (a.row || 0);
-        });
-
-        data.totalFound = data.tasks.length;
-
-        // บันทึกเข้า Memory Cache 60 วินาที
-        serverTasksCache.set(cacheKey, {
-          data,
-          timestamp: Date.now(),
-        });
-      }
-      return NextResponse.json(data);
-    } catch {
-      if (
-        responseText.includes("ต้องมีสิทธิ์เข้าถึง") ||
-        responseText.includes("Sign in")
-      ) {
-        return NextResponse.json(
-          {
-            success: false,
-            error:
-              "Google Apps Script แจ้งเตือน: 'ต้องมีสิทธิ์เข้าถึง' (โปรดตั้งค่า Deploy: 'Who has access' ให้เป็น 'Anyone')",
-          },
-          { status: 403 }
-        );
+      } catch {}
+    } 
+    // 2. กรณีเลือกแผ่นงานเดียว (Direct Fetch)
+    else if (requestedSheets.length === 1) {
+      const sName = requestedSheets[0];
+      const singleCacheKey = `tasks_${sName}_${assignee || "ALL"}_${pendingOnly}`;
+      const singleCached = serverTasksCache.get(singleCacheKey);
+      if (!isForce && singleCached && Date.now() - singleCached.timestamp < CACHE_TTL_MS) {
+        return NextResponse.json(singleCached.data);
       }
 
-      return NextResponse.json(
-        {
-          success: false,
-          error: `Google Apps Script ตอบกลับไม่ใช่ JSON: ${responseText.slice(0, 200)}`,
-        },
-        { status: 502 }
+      const targetUrl = new URL(gasUrl);
+      targetUrl.searchParams.set("action", action);
+      targetUrl.searchParams.set("sheet", sName);
+      targetUrl.searchParams.set("assignee", assignee);
+      targetUrl.searchParams.set("pendingOnly", "false");
+
+      const res = await fetch(targetUrl.toString(), {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        redirect: "follow",
+        cache: "no-store",
+      });
+
+      const responseText = await res.text();
+      try {
+        const data = JSON.parse(responseText);
+        if (data && data.success && Array.isArray(data.tasks)) {
+          allRawTasks = data.tasks;
+          isSuccess = true;
+        }
+      } catch {}
+    } 
+    // 3. กรณีเลือกหลายแผ่นงานพร้อมกัน (Parallel Fetching ด้วย Promise.all)
+    else {
+      const batchResults = await Promise.all(
+        requestedSheets.map(async (sName) => {
+          try {
+            const singleKey = `tasks_${sName}_${assignee || "ALL"}_${pendingOnly}`;
+            const singleCached = serverTasksCache.get(singleKey);
+            if (!isForce && singleCached && Date.now() - singleCached.timestamp < CACHE_TTL_MS) {
+              return singleCached.data.tasks || [];
+            }
+
+            const sUrl = new URL(gasUrl);
+            sUrl.searchParams.set("action", "getTasks");
+            sUrl.searchParams.set("sheet", sName);
+            sUrl.searchParams.set("assignee", assignee);
+            sUrl.searchParams.set("pendingOnly", "false");
+
+            const sRes = await fetch(sUrl.toString(), {
+              method: "GET",
+              headers: { Accept: "application/json" },
+              redirect: "follow",
+              cache: "no-store",
+            });
+            const sData = await sRes.json();
+            if (sData.success && Array.isArray(sData.tasks)) {
+              return sData.tasks;
+            }
+            return [];
+          } catch {
+            return [];
+          }
+        })
       );
+
+      allRawTasks = batchResults.flat();
+      isSuccess = true;
     }
+
+    if (isSuccess) {
+      // กรองความซ้ำซ้อนของงานตาม sheetName และ row
+      const seenKeys = new Set<string>();
+      let tasks = allRawTasks.filter((t: any) => {
+        const key = `${t.sheetName}_${t.row}`;
+        if (seenKeys.has(key)) return false;
+        seenKeys.add(key);
+        return true;
+      });
+
+      // จัดการลิงก์ใบบรีฟ ให้เปิดตรงเข้า Google Slides Presentation 100%
+      tasks = tasks.map((t: any) => {
+        let briefLink = (t.briefLink || "").trim();
+        let briefTitle = (t.briefTitle || "").trim();
+
+        // 1. ถ้ามี fileId ใน Google Drive อยู่แล้ว แปลงเป็น docs.google.com/presentation/d/.../edit ทันที
+        const dMatch =
+          briefLink.match(/\/d\/([-\w]{25,})/i) ||
+          briefLink.match(/[?&]id=([-\w]{25,})/i);
+
+        if (dMatch && dMatch[1]) {
+          briefLink = `https://docs.google.com/presentation/d/${dMatch[1]}/edit`;
+        } 
+        // 2. ถ้าไม่มีลิงก์ตรงๆ แต่มีชื่อใบบรีฟ ให้วิ่งผ่าน /api/brief เพื่อค้นหาและ redirect เข้า Google Slides 100%
+        else if (!briefLink.startsWith("http://") && !briefLink.startsWith("https://")) {
+          if (briefTitle) {
+            briefLink = `/api/brief?title=${encodeURIComponent(briefTitle)}&category=${encodeURIComponent(
+              t.category || ""
+            )}`;
+          } else if (briefLink) {
+            briefTitle = briefLink;
+            briefLink = `/api/brief?title=${encodeURIComponent(briefTitle)}&category=${encodeURIComponent(
+              t.category || ""
+            )}`;
+          }
+        }
+
+        return {
+          ...t,
+          briefLink,
+          briefTitle: briefTitle || "เปิดใบบรีฟ (Google Slides)",
+        };
+      });
+
+      // จัดเรียง: วันที่ล่าสุดขึ้นก่อน และงานที่ยังไม่เสร็จขึ้นก่อน
+      tasks.sort((a: any, b: any) => {
+        if (a.isCompleted !== b.isCompleted) {
+          return a.isCompleted ? 1 : -1;
+        }
+        return (b.row || 0) - (a.row || 0);
+      });
+
+      const responsePayload = {
+        success: true,
+        tasks: tasks,
+        totalFound: tasks.length,
+      };
+
+      // บันทึกเข้า Memory Cache
+      serverTasksCache.set(cacheKey, {
+        data: responsePayload,
+        timestamp: Date.now(),
+      });
+
+      return NextResponse.json(responsePayload);
+    }
+
+    return NextResponse.json(
+      {
+        success: false,
+        error: "ไม่สามารถดึงข้อมูลรายการงานจาก Google Sheets ได้ กรุณาลองใหม่อีกครั้ง",
+      },
+      { status: 502 }
+    );
   } catch (error) {
     return NextResponse.json(
       { success: false, error: (error as Error).message },

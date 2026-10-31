@@ -61,7 +61,13 @@ const CATEGORY_COLORS: Record<string, { bg: string; text: string; border: string
 
 export default function HomePage() {
   const [assignee, setAssignee] = useState<string>("ลูกหยี");
-  const [sheetName, setSheetName] = useState<string>("");
+  const [selectedSheets, setSelectedSheets] = useState<string[]>([]);
+  const [showAllDatesTray, setShowAllDatesTray] = useState<boolean>(false);
+  const sheetName = selectedSheets.includes("ALL")
+    ? "ทุกวันที่ (ALL)"
+    : selectedSheets.length > 0
+    ? selectedSheets.join(", ")
+    : "";
   const [pendingOnly, setPendingOnly] = useState<boolean>(true);
   const [staffList, setStaffList] = useState<string[]>([
     "ลูกหยี", "บอย", "วิน", "ปั้ม", "แม็กซ์", "เจมมี่", "เบียร์",
@@ -179,22 +185,26 @@ export default function HomePage() {
         if (data.sheetNames && data.sheetNames.length > 0) {
           setAvailableSheets(data.sheetNames);
 
-          const savedSheet = localStorage.getItem("gds_sheetName");
-          const today = new Date();
-          const thaiMonthsShort = ["มค", "กพ", "มีค", "เมย", "พค", "มิย", "กค", "สค", "กย", "ตค", "พย", "ธค"];
-          const todaySheetPrefix = `${today.getDate()} ${thaiMonthsShort[today.getMonth()]}`;
-
-          let targetSheet = "";
-          if (savedSheet && (data.sheetNames.includes(savedSheet) || savedSheet === "ALL")) {
-            targetSheet = savedSheet;
-          } else {
-            // ค้นหาแท็บที่ตรงกับวันปัจจุบัน หรือแท็บที่มีงานจริง
-            const matchToday = data.sheetNames.find((s: string) => s.replace(/\./g, "").trim() === todaySheetPrefix);
-            targetSheet = matchToday || data.sheetNames.find((s: string) => s.includes("31 ตค")) || data.sheetNames[0];
+          const savedSheetsJson = localStorage.getItem("gds_selectedSheets");
+          let initialSelected: string[] = [];
+          if (savedSheetsJson) {
+            try {
+              const parsed = JSON.parse(savedSheetsJson);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                initialSelected = parsed.filter(
+                  (s: string) => data.sheetNames.includes(s) || s === "ALL"
+                );
+              }
+            } catch {}
           }
 
-          setSheetName(targetSheet);
-          fetchTasks(initialAssignee, targetSheet);
+          // ถ้ายังไม่มีค่าบันทึกไว้ ให้เลือก 3 วันล่าสุดเป็นค่าเริ่มต้น
+          if (initialSelected.length === 0) {
+            initialSelected = data.sheetNames.slice(0, 3);
+          }
+
+          setSelectedSheets(initialSelected);
+          fetchTasks(initialAssignee, initialSelected);
         }
         if (data.staffList && data.staffList.length > 0) {
           setStaffList(data.staffList);
@@ -207,14 +217,31 @@ export default function HomePage() {
     }
   };
 
-  // โหลดรายการงานตามชื่อพนักงาน (Instant Cache + SWR)
-  const fetchTasks = async (targetAssignee = assignee, targetSheet = sheetName, forceLoading = false) => {
-    if (!targetSheet) return;
+  // โหลดรายการงานตามชื่อพนักงานและวันที่เลือก (Multi-Date Parallel Fetch + Client Cache Stitching)
+  const fetchTasks = async (
+    targetAssignee = assignee,
+    targetSheets: string[] | string = selectedSheets,
+    forceLoading = false
+  ) => {
+    const sheetsArray = Array.isArray(targetSheets)
+      ? targetSheets
+      : (targetSheets || "").split(",").map((s) => s.trim()).filter(Boolean);
 
-    // 1. ตรวจสอบว่ามีข้อมูลใน Client Cache แล้วหรือไม่ ถ้ามีและมีรายการงานให้แสดงผลทันทีใน 0 มิลลิวินาที
-    const cachedSheetTasks = clientSheetCacheRef.current[targetSheet];
-    if (cachedSheetTasks && cachedSheetTasks.length > 0 && !forceLoading) {
-      applyTasksToState(cachedSheetTasks, targetAssignee);
+    if (sheetsArray.length === 0) return;
+
+    // 1. ตรวจสอบว่าใน Client Cache มีครบทุกชีตที่เลือกหรือไม่ ถ้ามีครบให้แสดงผลทันทีใน 0 มิลลิวินาที
+    const isAllCached =
+      !forceLoading &&
+      !sheetsArray.includes("ALL") &&
+      sheetsArray.every(
+        (s) => clientSheetCacheRef.current[s] && clientSheetCacheRef.current[s].length > 0
+      );
+
+    if (isAllCached) {
+      const stitchedTasks = sheetsArray.flatMap(
+        (s) => clientSheetCacheRef.current[s] || []
+      );
+      applyTasksToState(stitchedTasks, targetAssignee);
       setIsLoading(false);
       setErrorMessage(null);
     } else {
@@ -239,10 +266,10 @@ export default function HomePage() {
     }, 120000);
 
     try {
-      // ดึงงานของแผ่นงานนั้นแบบ ALL เพื่อแคชไว้รองรับการสลับชื่อพนักงานได้ทันทีใน 0ms
-      const queryAssignee = targetSheet === "ALL" ? targetAssignee : "ALL";
+      const sheetsParam = sheetsArray.join(",");
+      const queryAssignee = sheetsArray.includes("ALL") ? targetAssignee : "ALL";
       const res = await fetch(
-        `/api/tasks?action=getTasks&sheet=${encodeURIComponent(targetSheet)}&assignee=${encodeURIComponent(
+        `/api/tasks?action=getTasks&sheet=${encodeURIComponent(sheetsParam)}&assignee=${encodeURIComponent(
           queryAssignee
         )}&pendingOnly=false`,
         { signal: controller.signal }
@@ -255,12 +282,20 @@ export default function HomePage() {
       const data = await res.json();
       if (data.success) {
         const rawTasks: Task[] = data.tasks || [];
-        if (targetSheet !== "ALL") {
-          clientSheetCacheRef.current[targetSheet] = rawTasks;
-        }
+
+        // บันทึกลง Client Cache แยกตามแผ่นงาน
+        const grouped: Record<string, Task[]> = {};
+        rawTasks.forEach((t) => {
+          if (!grouped[t.sheetName]) grouped[t.sheetName] = [];
+          grouped[t.sheetName].push(t);
+        });
+        Object.entries(grouped).forEach(([sName, sTasks]) => {
+          clientSheetCacheRef.current[sName] = sTasks;
+        });
+
         applyTasksToState(rawTasks, targetAssignee);
       } else {
-        if (!cachedSheetTasks) {
+        if (!isAllCached) {
           setErrorMessage(data.error || "เกิดข้อผิดพลาดในการดึงข้อมูลจาก Google Sheets");
           setTasks([]);
         }
@@ -268,16 +303,56 @@ export default function HomePage() {
     } catch (err: any) {
       if (err.name !== "AbortError") {
         console.error(err);
-        if (!cachedSheetTasks) {
+        if (!isAllCached) {
           setErrorMessage("ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ Next.js ได้");
         }
       }
     } finally {
       clearTimeout(timeoutId);
-      // ปิด isLoading เฉพาะเมื่อเป็น controller ล่าสุดเท่านั้น เพื่อป้องกัน race condition
       if (abortControllerRef.current === controller) {
         setIsLoading(false);
       }
+    }
+  };
+
+  // Toggle เลือก/ยกเลิกวันที่
+  const handleToggleSheet = (sheet: string) => {
+    let updated: string[];
+    if (sheet === "ALL") {
+      updated = ["ALL"];
+    } else {
+      const withoutAll = selectedSheets.filter((s) => s !== "ALL");
+      if (withoutAll.includes(sheet)) {
+        updated = withoutAll.filter((s) => s !== sheet);
+        if (updated.length === 0 && availableSheets.length > 0) {
+          updated = [availableSheets[0]];
+        }
+      } else {
+        updated = [...withoutAll, sheet];
+      }
+    }
+    setSelectedSheets(updated);
+    localStorage.setItem("gds_selectedSheets", JSON.stringify(updated));
+    fetchTasks(assignee, updated);
+  };
+
+  // Quick Presets: วันนี้, 3 วันล่าสุด, 7 วันล่าสุด, ทุกวันที่ (ALL)
+  const handleSelectPreset = (preset: "today" | "last3" | "last7" | "all") => {
+    let target: string[] = [];
+    if (preset === "today") {
+      target = availableSheets.slice(0, 1);
+    } else if (preset === "last3") {
+      target = availableSheets.slice(0, 3);
+    } else if (preset === "last7") {
+      target = availableSheets.slice(0, 7);
+    } else if (preset === "all") {
+      target = ["ALL"];
+    }
+
+    if (target.length > 0) {
+      setSelectedSheets(target);
+      localStorage.setItem("gds_selectedSheets", JSON.stringify(target));
+      fetchTasks(assignee, target);
     }
   };
 
@@ -302,8 +377,8 @@ export default function HomePage() {
   const handleAssigneeChange = (newName: string) => {
     setAssignee(newName);
     localStorage.setItem("gds_assignee", newName);
-    if (sheetName) {
-      fetchTasks(newName, sheetName);
+    if (selectedSheets.length > 0) {
+      fetchTasks(newName, selectedSheets);
     }
   };
 
@@ -394,7 +469,7 @@ export default function HomePage() {
 
         // ล้าง Client Cache เพื่อให้ดึงข้อมูลโฟลเดอร์ล่าสุดที่เพิ่งสร้างมาแสดงผล
         clientSheetCacheRef.current = {};
-        fetchTasks(assignee, sheetName, true);
+        fetchTasks(assignee, selectedSheets, true);
       } else {
         alert(result.error || result.message || "เกิดข้อผิดพลาดในการสร้างโฟลเดอร์");
       }
@@ -493,7 +568,7 @@ export default function HomePage() {
 
         {/* Filter Controls Card */}
         <section className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
             {/* Staff Selector */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
@@ -520,38 +595,7 @@ export default function HomePage() {
               </div>
             </div>
 
-            {/* Date Selector */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1.5 flex items-center gap-1.5">
-                <Calendar className="w-3.5 h-3.5 text-indigo-600" />
-                <span>วันที่ต้องการค้นหา</span>
-              </label>
-              <select
-                value={sheetName}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setSheetName(val);
-                  localStorage.setItem("gds_sheetName", val);
-                  fetchTasks(assignee, val);
-                }}
-                disabled={isMetadataLoading || availableSheets.length === 0}
-                className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-medium disabled:opacity-75 disabled:cursor-not-allowed"
-              >
-                {availableSheets.length === 0 ? (
-                  <option value="">⏳ กำลังดึงวันที่จากชีต...</option>
-                ) : (
-                  <>
-                    {availableSheets.map((s) => (
-                      <option key={s} value={s}>
-                        📅 {s}
-                      </option>
-                    ))}
-                    <option value="ALL">🔍 ทุกวันที่ (ค้นหางานค้างข้ามแท็บ)</option>
-                  </>
-                )}
-              </select>
-            </div>
-
+            {/* Search Category */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1.5 flex items-center gap-1.5">
                 <Search className="w-3.5 h-3.5 text-slate-400" />
@@ -566,13 +610,14 @@ export default function HomePage() {
               />
             </div>
 
-            <div className="flex gap-2">
+            {/* Refresh Button */}
+            <div>
               <button
                 onClick={() => {
-                  delete clientSheetCacheRef.current[sheetName];
-                  fetchTasks(assignee, sheetName, true);
+                  clientSheetCacheRef.current = {};
+                  fetchTasks(assignee, selectedSheets, true);
                 }}
-                disabled={isLoading || isMetadataLoading || !sheetName}
+                disabled={isLoading || isMetadataLoading || selectedSheets.length === 0}
                 className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] rounded-xl shadow-xs transition-all disabled:opacity-60 cursor-pointer"
               >
                 <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
@@ -585,6 +630,153 @@ export default function HomePage() {
                 </span>
               </button>
             </div>
+          </div>
+
+          {/* Multi-Date Selection Box with Checkbox Pills & Quick Presets */}
+          <div className="bg-slate-50/90 p-4 rounded-2xl border border-slate-200/90 mt-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Calendar className="w-4 h-4 text-indigo-600" />
+                <span className="text-xs font-bold text-slate-800">
+                  เลือกวันที่ต้องการดูงาน
+                </span>
+                <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200">
+                  {selectedSheets.includes("ALL")
+                    ? "แสดงทุกวันที่ (ALL)"
+                    : `เลือกแล้ว ${selectedSheets.length} วัน`}
+                </span>
+              </div>
+
+              {/* Quick Presets (1-Click Fast Action) */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[11px] text-slate-400 font-medium mr-1">เลือกด่วน:</span>
+                <button
+                  type="button"
+                  onClick={() => handleSelectPreset("today")}
+                  className={`px-2.5 py-1 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
+                    selectedSheets.length === 1 && selectedSheets[0] === availableSheets[0]
+                      ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs"
+                      : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
+                  }`}
+                >
+                  ⚡ วันนี้
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSelectPreset("last3")}
+                  className={`px-2.5 py-1 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
+                    selectedSheets.length === 3 && !selectedSheets.includes("ALL")
+                      ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs"
+                      : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
+                  }`}
+                >
+                  ⚡ 3 วันล่าสุด
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSelectPreset("last7")}
+                  className={`px-2.5 py-1 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
+                    selectedSheets.length === 7 && !selectedSheets.includes("ALL")
+                      ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs"
+                      : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
+                  }`}
+                >
+                  ⚡ 7 วันล่าสุด
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSelectPreset("all")}
+                  className={`px-2.5 py-1 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
+                    selectedSheets.includes("ALL")
+                      ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs"
+                      : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
+                  }`}
+                >
+                  🌐 ทุกวันที่ (ALL)
+                </button>
+              </div>
+            </div>
+
+            {/* Checkbox Pills Grid */}
+            <div className="flex flex-wrap gap-2 pt-1">
+              {availableSheets.length === 0 ? (
+                <span className="text-xs text-slate-400 italic">⏳ กำลังดึงวันที่จากชีตจริง...</span>
+              ) : (
+                availableSheets.slice(0, showAllDatesTray ? availableSheets.length : 14).map((s, idx) => {
+                  const isChecked = selectedSheets.includes(s) && !selectedSheets.includes("ALL");
+                  const isLatest = idx === 0;
+
+                  return (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => handleToggleSheet(s)}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer select-none ${
+                        isChecked
+                          ? "bg-indigo-600 text-white border-indigo-600 shadow-xs ring-2 ring-indigo-500/20"
+                          : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100 hover:border-slate-300"
+                      }`}
+                    >
+                      {isChecked ? (
+                        <CheckSquare className="w-3.5 h-3.5 text-white" />
+                      ) : (
+                        <Square className="w-3.5 h-3.5 text-slate-400" />
+                      )}
+                      <span>{s}</span>
+                      {isLatest && (
+                        <span
+                          className={`text-[9px] px-1 py-0.2 rounded-sm font-bold uppercase ${
+                            isChecked ? "bg-white/20 text-white" : "bg-emerald-100 text-emerald-800"
+                          }`}
+                        >
+                          ล่าสุด
+                        </span>
+                      )}
+                    </button>
+                  );
+                })
+              )}
+
+              {/* Toggle More Dates Button if > 14 sheets */}
+              {availableSheets.length > 14 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllDatesTray((prev) => !prev)}
+                  className="px-2.5 py-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer"
+                >
+                  {showAllDatesTray
+                    ? "ย่อวันที่ ▲"
+                    : `+ ดูเพิ่มเติมอีก ${availableSheets.length - 14} วัน ▼`}
+                </button>
+              )}
+            </div>
+
+            {/* Summary Bar */}
+            {!selectedSheets.includes("ALL") && selectedSheets.length > 0 && (
+              <div className="mt-2.5 pt-2 border-t border-slate-200/60 flex items-center justify-between text-[11px] text-slate-500 flex-wrap gap-2">
+                <span>
+                  กำลังแสดงงานของวันที่:{" "}
+                  <b className="text-indigo-900 font-bold">{selectedSheets.join(", ")}</b>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (availableSheets.length > 0) {
+                      const reset = [availableSheets[0]];
+                      setSelectedSheets(reset);
+                      localStorage.setItem("gds_selectedSheets", JSON.stringify(reset));
+                      fetchTasks(assignee, reset);
+                    }
+                  }}
+                  className="text-slate-400 hover:text-rose-600 transition-colors font-medium cursor-pointer"
+                >
+                  รีเซ็ตเหลือวันล่าสุด
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between flex-wrap gap-2">
@@ -789,8 +981,9 @@ export default function HomePage() {
               </p>
               <button
                 onClick={() => {
-                  setSheetName("ALL");
-                  fetchTasks(assignee, "ALL");
+                  setSelectedSheets(["ALL"]);
+                  localStorage.setItem("gds_selectedSheets", JSON.stringify(["ALL"]));
+                  fetchTasks(assignee, ["ALL"]);
                 }}
                 className="mt-4 px-3.5 py-1.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 text-xs font-semibold rounded-xl transition-all inline-flex items-center gap-1.5 cursor-pointer"
               >
@@ -882,13 +1075,15 @@ export default function HomePage() {
                             </td>
                             <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
                               {(() => {
-                                const isDirectUrl = task.briefLink && (task.briefLink.startsWith("http://") || task.briefLink.startsWith("https://"));
-                                const titleText = task.briefTitle || (isDirectUrl ? "" : task.briefLink) || "ใบบรีฟ";
-                                const targetUrl = isDirectUrl
-                                  ? task.briefLink
-                                  : titleText && titleText !== "-"
-                                  ? `https://drive.google.com/drive/search?q=${encodeURIComponent(titleText)}`
-                                  : null;
+                                const rawLink = (task.briefLink || "").trim();
+                                const titleText = (task.briefTitle || "").trim() || "ใบบรีฟ";
+                                let targetUrl: string | null = null;
+
+                                if (rawLink) {
+                                  targetUrl = rawLink;
+                                } else if (titleText && titleText !== "-") {
+                                  targetUrl = `/api/brief?title=${encodeURIComponent(titleText)}&category=${encodeURIComponent(task.category || "")}`;
+                                }
 
                                 if (targetUrl) {
                                   return (
@@ -897,7 +1092,7 @@ export default function HomePage() {
                                       target="_blank"
                                       rel="noopener noreferrer"
                                       className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/90 px-2.5 py-1.5 rounded-lg transition-colors group shadow-2xs max-w-[220px]"
-                                      title={isDirectUrl ? `คลิกเปิดใบบรีฟ: ${titleText}` : `คลิกค้นหาใบบรีฟใน Google Drive: ${titleText}`}
+                                      title={`คลิกเปิดใบบรีฟ Google Slides: ${titleText}`}
                                     >
                                       <ExternalLink className="w-3.5 h-3.5 text-indigo-500 group-hover:text-indigo-700 shrink-0" />
                                       <span className="truncate">{titleText}</span>

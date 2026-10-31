@@ -421,7 +421,8 @@ function extractCellLinkAndTitle(val, richText, formula) {
 }
 
 /**
- * ค้นหา URL ของไฟล์ใบบรีฟใน Google Drive ตามชื่อ (เน้นบังคับคืนค่าเป็นลิงก์ Google Slides Presentation)
+ * ค้นหา URL ของไฟล์ใบบรีฟใน Google Drive ตามชื่อ (เน้นบังคับคืนค่าเป็นลิงก์ Google Slides Presentation 100%)
+ * รองรับทั้ง Google Slides และไฟล์ PowerPoint (.pptx) ที่อัปโหลดขึ้น Drive
  */
 function findDriveFileOrFolderUrl(title) {
   if (!title || typeof title !== "string") return "";
@@ -429,25 +430,59 @@ function findDriveFileOrFolderUrl(title) {
   if (!cleanTitle || cleanTitle.length < 2) return "";
 
   const singleSpaced = cleanTitle.replace(/\s+/g, " ");
+  const titleWithoutExt = singleSpaced.replace(/\.(pptx?|pdf|docx?)$/i, "").trim();
 
-  // 1. ค้นหา Google Slides (Presentation) แบบชื่อตรงหรือใกล้เคียงก่อนเสมอ
+  // 1. ค้นหาไฟล์ตรงตามชื่อ (ทั้งที่มีนามสกุล และไม่มีนามสกุล)
   try {
-    const safeFull = singleSpaced.replace(/['"\\]/g, "");
-    const qFull = `title contains '${safeFull.slice(0, 30)}' and mimeType = 'application/vnd.google-apps.presentation' and trashed = false`;
+    const namesToCheck = [singleSpaced];
+    if (titleWithoutExt && titleWithoutExt !== singleSpaced) {
+      namesToCheck.push(titleWithoutExt);
+      namesToCheck.push(titleWithoutExt + ".pptx");
+      namesToCheck.push(titleWithoutExt + ".ppt");
+    }
+
+    for (let n = 0; n < namesToCheck.length; n++) {
+      const files = DriveApp.getFilesByName(namesToCheck[n]);
+      while (files.hasNext()) {
+        const f = files.next();
+        if (!f.isTrashed()) {
+          const mType = f.getMimeType();
+          // ถ้าเป็น Google Slides หรือ PPTX ให้คืนค่าเป็น presentation edit URL ทันที
+          if (
+            mType === "application/vnd.google-apps.presentation" ||
+            mType === "application/vnd.openxmlformats-officedocument.presentationml.presentation" ||
+            f.getName().toLowerCase().endsWith(".pptx")
+          ) {
+            return `https://docs.google.com/presentation/d/${f.getId()}/edit`;
+          }
+          return f.getUrl();
+        }
+      }
+    }
+  } catch (e) {
+    Logger.log("Exact file name search: " + e.message);
+  }
+
+  // 2. ค้นหาผ่าน searchFiles โดยรองรับทั้ง Google Slides และ PowerPoint (.pptx)
+  try {
+    const safeFull = (titleWithoutExt || singleSpaced).replace(/['"\\]/g, "");
+    const qFull = `title contains '${safeFull.slice(0, 30)}' and (mimeType = 'application/vnd.google-apps.presentation' or mimeType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation') and trashed = false`;
     const slidesFull = DriveApp.searchFiles(qFull);
     if (slidesFull.hasNext()) {
       const slide = slidesFull.next();
       return `https://docs.google.com/presentation/d/${slide.getId()}/edit`;
     }
-  } catch (e) {}
+  } catch (e) {
+    Logger.log("Full title search error: " + e.message);
+  }
 
-  // 2. ค้นหา Google Slides จากคีย์เวิร์ดส่วนแรก (กรณีย่อชื่อหรือมีเครื่องหมายขีดคั่น)
+  // 3. ค้นหาจากคีย์เวิร์ดสำคัญ (เช่น SLOT BRIEF, FOOTBALL BRIEF, BOXING BRIEF)
   try {
-    const segments = singleSpaced.split(/[-–—]/);
+    const segments = (titleWithoutExt || singleSpaced).split(/[-–—]/);
     const mainKey = (segments[0] || singleSpaced).trim().replace(/['"\\]/g, "");
 
     if (mainKey.length >= 3) {
-      const q = `title contains '${mainKey}' and mimeType = 'application/vnd.google-apps.presentation' and trashed = false`;
+      const q = `title contains '${mainKey.slice(0, 30)}' and (mimeType = 'application/vnd.google-apps.presentation' or mimeType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation') and trashed = false`;
       const slides = DriveApp.searchFiles(q);
       if (slides.hasNext()) {
         const slide = slides.next();
@@ -458,20 +493,32 @@ function findDriveFileOrFolderUrl(title) {
     Logger.log("Slides search error: " + e.message);
   }
 
-  // 3. ลองค้นหาไฟล์ตรงตามชื่อ (ถ้าเป็น Presentation ให้แปลงเป็นลิงก์ presentation ทันที)
+  return "";
+}
+
+/**
+ * ค้นหาและแปลงชื่อใบบรีฟเป็นลิงก์เปิด Google Slides Presentation (สำหรับ Action resolveBrief)
+ * แคชผลลัพธ์ไว้ 6 ชั่วโมง (21600 วินาที) เพื่อความเร็วระดับ 0ms ในการกดครั้งถัดไป
+ */
+function resolveBriefSlideUrl(title) {
+  if (!title || typeof title !== "string") return "";
+  const cleanTitle = title.trim();
+  if (!cleanTitle) return "";
+
+  const scriptCache = CacheService.getScriptCache();
+  const cacheKey = "RESOLVE_BRIEF_SLIDE_V3_" + Utilities.base64EncodeWebSafe(cleanTitle).slice(0, 60);
   try {
-    const files = DriveApp.getFilesByName(singleSpaced);
-    while (files.hasNext()) {
-      const f = files.next();
-      if (!f.isTrashed()) {
-        if (f.getMimeType() === "application/vnd.google-apps.presentation") {
-          return `https://docs.google.com/presentation/d/${f.getId()}/edit`;
-        }
-        return f.getUrl();
-      }
-    }
+    const cached = scriptCache.get(cacheKey);
+    if (cached) return cached;
   } catch (e) {}
 
+  const slideUrl = findDriveFileOrFolderUrl(cleanTitle);
+  if (slideUrl) {
+    try {
+      scriptCache.put(cacheKey, slideUrl, 21600); // 6 ชั่วโมง
+    } catch (e) {}
+    return slideUrl;
+  }
   return "";
 }
 
@@ -1087,7 +1134,13 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
           }
 
           const isCompleted = status.includes("เสร็จสิ้น") || (uploadUrl !== "" && uploadCellText !== "");
-          const taskBriefLink = fastFormatPresentationUrl(currentBriefLink);
+          let taskBriefLink = fastFormatPresentationUrl(currentBriefLink);
+          if (!taskBriefLink && currentBriefTitle) {
+            try {
+              const cachedSlide = scriptCache.get("RESOLVE_BRIEF_SLIDE_V3_" + Utilities.base64EncodeWebSafe(currentBriefTitle).slice(0, 60));
+              if (cachedSlide) taskBriefLink = cachedSlide;
+            } catch (e) {}
+          }
           const team = (vals[CONFIG.COL_TEAM - 1]?.formattedValue || "").toString().trim();
           const assignDate = vals[CONFIG.COL_ASSIGN_DATE - 1]?.formattedValue || "";
 
@@ -1179,7 +1232,13 @@ function getStaffTasks(assignee, targetSheet, pendingOnly) {
           }
 
           const isCompleted = status.includes("เสร็จสิ้น") || (uploadUrl !== "" && uploadCellText !== "");
-          const taskBriefLink = fastFormatPresentationUrl(currentBriefLink);
+          let taskBriefLink = fastFormatPresentationUrl(currentBriefLink);
+          if (!taskBriefLink && currentBriefTitle) {
+            try {
+              const cachedSlide = scriptCache.get("RESOLVE_BRIEF_SLIDE_V3_" + Utilities.base64EncodeWebSafe(currentBriefTitle).slice(0, 60));
+              if (cachedSlide) taskBriefLink = cachedSlide;
+            } catch (e) {}
+          }
           const team = (values[rowIdx][CONFIG.COL_TEAM - 1] || "").toString().trim();
           const assignDate = values[rowIdx][CONFIG.COL_ASSIGN_DATE - 1] || "";
 
@@ -1507,6 +1566,10 @@ function doGet(e) {
       const sheet = e.parameter.sheet || "";
       const pendingOnly = e.parameter.pendingOnly === "true";
       data = getStaffTasks(assignee, sheet, pendingOnly);
+    } else if (action === "resolveBrief") {
+      const title = e.parameter.title || "";
+      const slideUrl = resolveBriefSlideUrl(title);
+      data = { success: true, url: slideUrl };
     } else {
       data = { success: false, error: "Invalid action" };
     }
