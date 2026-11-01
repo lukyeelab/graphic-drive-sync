@@ -1768,10 +1768,11 @@ export default function HomePage() {
                       <tr className="bg-[#F2F2F7] text-[11px] font-semibold text-[#8E8E93] uppercase tracking-wider">
                         <th className="py-3.5 px-3 w-12 text-center text-[#8E8E93] border-b border-[#E5E5EA]">เลือก</th>
                         <th className="py-3.5 px-2 w-14 text-center text-[#8E8E93] border-b border-[#E5E5EA]">แถว</th>
-                        <th className="py-3.5 px-3 whitespace-nowrap text-[#8E8E93] border-b border-[#E5E5EA]">หมวดหมู่</th>
-                        <th className="py-3.5 px-2.5 w-32 max-w-[150px] whitespace-nowrap text-[#8E8E93] border-b border-[#E5E5EA]">ใบบรีฟ</th>
+                        <th className="py-3.5 px-3 whitespace-nowrap text-center text-[#8E8E93] border-b border-[#E5E5EA]">หมวดหมู่</th>
+                        <th className="py-3.5 px-2.5 w-32 max-w-[150px] whitespace-nowrap text-center text-[#8E8E93] border-b border-[#E5E5EA]">ใบบรีฟ</th>
                         <th className="py-3.5 px-2 w-12 text-center text-[#8E8E93] border-b border-[#E5E5EA]">No.</th>
                         <th className="py-3.5 px-4 min-w-[270px] text-[#8E8E93] border-b border-[#E5E5EA]">ชื่องาน/ชื่อโฟลเดอร์ (TH)</th>
+                        <th className="py-3.5 px-3 whitespace-nowrap text-center text-[#8E8E93] border-b border-[#E5E5EA]">ผู้รับงาน</th>
                         <th className="py-3.5 px-3 whitespace-nowrap text-center text-[#8E8E93] border-b border-[#E5E5EA]">วันที่จ่ายงาน</th>
                         <th className="py-3.5 px-3 w-28 whitespace-nowrap text-center text-[#8E8E93] border-b border-[#E5E5EA]">สถานะ</th>
                         <th className="py-3.5 px-3 w-40 whitespace-nowrap text-center text-[#8E8E93] border-b border-[#E5E5EA]">ลิงก์โฟลเดอร์ (TH & INTER)</th>
@@ -1827,15 +1828,15 @@ export default function HomePage() {
                             <td className={`py-3.5 px-2 text-center text-xs font-mono font-semibold text-[#8E8E93] ${cellBorder}`}>
                               #{task.row}
                             </td>
-                            <td className={`py-3.5 px-3 whitespace-nowrap ${cellBorder}`}>
+                            <td className={`py-3.5 px-3 text-center whitespace-nowrap ${cellBorder}`}>
                               <span
-                                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap border ${catStyle.bg} ${catStyle.text} ${catStyle.border} shadow-2xs`}
+                                className={`inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap border ${catStyle.bg} ${catStyle.text} ${catStyle.border} shadow-2xs`}
                               >
                                 <span className={`w-1.5 h-1.5 rounded-full ${catStyle.dot}`} />
                                 <span>{task.category}</span>
                               </span>
                             </td>
-                            <td className={`py-3.5 px-2.5 w-32 max-w-[150px] ${cellBorder}`} onClick={(e) => e.stopPropagation()}>
+                            <td className={`py-3.5 px-2.5 w-32 max-w-[150px] text-center ${cellBorder}`} onClick={(e) => e.stopPropagation()}>
                               {(() => {
                                 const rawLink = (task.briefLink || "").trim();
                                 const titleText = (task.briefTitle || "").trim() || "ใบบรีฟ";
@@ -1853,7 +1854,7 @@ export default function HomePage() {
                                       href={targetUrl}
                                       target="_blank"
                                       rel="noopener noreferrer"
-                                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#007AFF] hover:text-[#0066D6] bg-[#007AFF]/10 hover:bg-[#007AFF]/15 border border-[#007AFF]/20 px-2.5 py-1 rounded-xl transition-all shadow-2xs max-w-[140px] group"
+                                      className="inline-flex items-center justify-center gap-1.5 text-xs font-semibold text-[#007AFF] hover:text-[#0066D6] bg-[#007AFF]/10 hover:bg-[#007AFF]/15 border border-[#007AFF]/20 px-2.5 py-1 rounded-xl transition-all shadow-2xs max-w-[140px] mx-auto group"
                                       title={`คลิกเปิดใบบรีฟ Google Slides: ${titleText}`}
                                     >
                                       <ExternalLink className="w-3 h-3 text-[#007AFF] group-hover:text-[#0066D6] shrink-0" />
@@ -1901,6 +1902,16 @@ export default function HomePage() {
                                   </div>
                                 );
                               })()}
+                            </td>
+                            <td className={`py-3.5 px-3 text-center whitespace-nowrap ${cellBorder}`}>
+                              {task.assignee ? (
+                                <span className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold text-[#1C1C1E] bg-[#767680]/[0.08] border border-black/[0.06] shadow-2xs">
+                                  <User className="w-3 h-3 text-[#007AFF] shrink-0" />
+                                  <span>{task.assignee}</span>
+                                </span>
+                              ) : (
+                                <span className="text-xs text-[#8E8E93]">-</span>
+                              )}
                             </td>
                             <td className={`py-3.5 px-3 text-center whitespace-nowrap ${cellBorder}`}>
                               {(() => {
