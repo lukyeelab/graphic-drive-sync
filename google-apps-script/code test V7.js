@@ -1841,7 +1841,7 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force, knownHashesJso
       }
     } else {
       const sortedSheets = sortSheetNamesDesc(allSheetNames);
-      const limitSheets = isSpecificAssignee ? 10 : 8;
+      const limitSheets = Math.min(sortedSheets.length, 60);
       targetSheetNames = sortedSheets.slice(0, limitSheets);
       const extraKeys = [];
       for (let i = 0; i < targetSheetNames.length; i++) {

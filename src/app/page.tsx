@@ -142,11 +142,6 @@ function getThaiDayOfWeekInfo(dateStr: string): ThaiDayColor | null {
 export default function HomePage() {
   const [assignee, setAssignee] = useState<string>("ลูกหยี");
   const [selectedSheets, setSelectedSheets] = useState<string[]>([]);
-  const sheetName = selectedSheets.includes("ALL")
-    ? "ทุกวันที่ (ALL)"
-    : selectedSheets.length > 0
-    ? selectedSheets.join(", ")
-    : "";
   const [pendingOnly, setPendingOnly] = useState<boolean>(true);
   const [staffList, setStaffList] = useState<string[]>([
     "ลูกหยี", "บอย", "วิน", "ปั้ม", "แม็กซ์", "เจมมี่", "เบียร์",
@@ -154,6 +149,14 @@ export default function HomePage() {
     "แพท", "กิ๊ก", "ภา", "เค้ก", "พี่นาย", "เม่น", "นิว", "มายด์", "เอ้"
   ]);
   const [availableSheets, setAvailableSheets] = useState<string[]>([]);
+  const isAllSelected =
+    selectedSheets.includes("ALL") ||
+    (availableSheets.length > 0 && selectedSheets.length === availableSheets.length);
+  const sheetName = isAllSelected
+    ? `ทุกวันที่ (ALL - ${availableSheets.length || 52} วัน)`
+    : selectedSheets.length > 0
+    ? selectedSheets.join(", ")
+    : "";
   const monthGroups = useMemo(() => {
     const nov: string[] = [];
     const oct: string[] = [];
@@ -423,9 +426,13 @@ export default function HomePage() {
             try {
               const parsed = JSON.parse(savedSheetsJson);
               if (Array.isArray(parsed) && parsed.length > 0) {
-                initialSelected = parsed.filter(
-                  (s: string) => data.sheetNames.includes(s) || s === "ALL"
-                );
+                if (parsed.includes("ALL") || parsed.length === data.sheetNames.length) {
+                  initialSelected = [...data.sheetNames];
+                } else {
+                  initialSelected = parsed.filter(
+                    (s: string) => data.sheetNames.includes(s)
+                  );
+                }
               }
             } catch {}
           }
@@ -480,35 +487,54 @@ export default function HomePage() {
     setErrorMessage(null);
     setSyncResult(null);
 
-    const isModeAll = sheetsArray.includes("ALL");
-    const targetSheetsList = isModeAll
-      ? (availableSheets.length > 0 ? availableSheets : ["ALL"])
-      : sheetsArray;
+    const isModeAll = sheetsArray.includes("ALL") || (availableSheets.length > 0 && sheetsArray.length === availableSheets.length);
+    let targetSheetsList = sheetsArray.includes("ALL")
+      ? (availableSheets.length > 0 ? [...availableSheets] : [])
+      : [...sheetsArray];
 
-    // 1. อ่านข้อมูลจาก IndexedDB มาเติมลง clientSheetCacheRef เสมอ
-    if (!isModeAll) {
-      const dbCachedMap = await getSheetsFromIndexedDB(targetSheetsList);
-      Object.entries(dbCachedMap).forEach(([sName, record]) => {
-        if (record && Array.isArray(record.tasks)) {
-          if (!clientSheetCacheRef.current[sName] || clientSheetCacheRef.current[sName].length === 0) {
-            clientSheetCacheRef.current[sName] = record.tasks as Task[];
-          }
-          if (record.checksum) {
-            sheetChecksumsRef.current[sName] = record.checksum;
-          }
+    // ถ้าเลือก ALL แต่ availableSheets ยังว่าง ให้ดึง metadata ก่อนเพื่อรู้ชื่อแท็บวันทั้งหมด
+    if (targetSheetsList.length === 0 && sheetsArray.includes("ALL")) {
+      try {
+        const metaRes = await fetch("/api/tasks?action=getMetadata");
+        const metaData = await metaRes.json();
+        if (metaData.success && metaData.sheetNames?.length > 0) {
+          setAvailableSheets(metaData.sheetNames);
+          targetSheetsList = [...metaData.sheetNames];
         }
-      });
+      } catch (e) {}
     }
 
-    // 2. ถ้าไม่ได้บังคับรีเฟรช (!forceLoading) และมีข้อมูลครบในแคชแล้ว ให้แสดงผลทันทีใน 0ms!
-    const cachedSheets = !isModeAll
-      ? targetSheetsList.filter((s) => clientSheetCacheRef.current[s] && clientSheetCacheRef.current[s].length > 0)
-      : [];
+    if (targetSheetsList.length === 0) {
+      targetSheetsList = [...sheetsArray];
+    }
 
-    const isAllCached = !forceLoading && cachedSheets.length === targetSheetsList.length && targetSheetsList.length > 0;
+    // 1. อ่านข้อมูลจาก IndexedDB มาเติมลง clientSheetCacheRef เสมอ (ไม่ข้ามเมื่อเลือก ALL)
+    const dbCachedMap = await getSheetsFromIndexedDB(targetSheetsList);
+    Object.entries(dbCachedMap).forEach(([sName, record]) => {
+      if (record && Array.isArray(record.tasks)) {
+        if (!clientSheetCacheRef.current[sName] || clientSheetCacheRef.current[sName].length === 0) {
+          clientSheetCacheRef.current[sName] = record.tasks as Task[];
+        }
+        if (record.checksum) {
+          sheetChecksumsRef.current[sName] = record.checksum;
+        }
+      }
+    });
+
+    // 2. ถ้าไม่ได้บังคับรีเฟรช (!forceLoading) และมีข้อมูลในแคชแล้ว ให้แสดงผลทันทีใน 0ms!
+    const cachedSheets = targetSheetsList.filter(
+      (s) => clientSheetCacheRef.current[s] !== undefined
+    );
+
+    const isAllCached =
+      !forceLoading &&
+      targetSheetsList.length > 0 &&
+      cachedSheets.length === targetSheetsList.length;
 
     if (cachedSheets.length > 0) {
-      const stitchedCached = cachedSheets.flatMap((s) => clientSheetCacheRef.current[s] || []);
+      const stitchedCached = targetSheetsList.flatMap(
+        (s) => clientSheetCacheRef.current[s] || []
+      );
       applyTasksToState(stitchedCached, targetAssignee);
       if (isAllCached) {
         setIsLoading(false);
@@ -520,9 +546,13 @@ export default function HomePage() {
     // แผ่นงานที่ต้องเชื่อมต่อไปยังหลังบ้าน (เฉพาะวันที่ยังไม่มีในแคช หรือเมื่อกดปุ่ม ค้นหางานของฉัน forceLoading=true)
     let sheetsToSync = forceLoading
       ? targetSheetsList
-      : targetSheetsList.filter((s) => !clientSheetCacheRef.current[s]);
+      : targetSheetsList.filter((s) => clientSheetCacheRef.current[s] === undefined);
 
     if (sheetsToSync.length === 0) {
+      const allCurrentTasks = targetSheetsList.flatMap(
+        (s) => clientSheetCacheRef.current[s] || []
+      );
+      applyTasksToState(allCurrentTasks, targetAssignee);
       setIsLoading(false);
       setStreamingProgress(null);
       return;
@@ -659,16 +689,22 @@ export default function HomePage() {
   const handleToggleSheet = (sheet: string) => {
     let updated: string[];
     if (sheet === "ALL") {
-      updated = ["ALL"];
+      updated = availableSheets.length > 0 ? [...availableSheets] : ["ALL"];
     } else {
-      const withoutAll = selectedSheets.filter((s) => s !== "ALL");
-      if (withoutAll.includes(sheet)) {
-        updated = withoutAll.filter((s) => s !== sheet);
+      const isCurrentlyAll =
+        selectedSheets.includes("ALL") ||
+        (availableSheets.length > 0 && selectedSheets.length === availableSheets.length);
+      const currentSelection = isCurrentlyAll
+        ? (availableSheets.length > 0 ? [...availableSheets] : [])
+        : selectedSheets.filter((s) => s !== "ALL");
+
+      if (currentSelection.includes(sheet)) {
+        updated = currentSelection.filter((s) => s !== sheet);
         if (updated.length === 0 && availableSheets.length > 0) {
           updated = [availableSheets[0]];
         }
       } else {
-        updated = [...withoutAll, sheet];
+        updated = [...currentSelection, sheet];
       }
     }
     setSelectedSheets(updated);
@@ -683,16 +719,21 @@ export default function HomePage() {
   // เลือกทั้งกลุ่มเดือน (เช่น เดือน พ.ย. หรือ เดือน ต.ค.)
   const handleToggleMonthGroup = (sheetsInGroup: string[]) => {
     if (sheetsInGroup.length === 0) return;
-    const isAllGroupSelected = sheetsInGroup.every((s) => selectedSheets.includes(s));
+    const isCurrentlyAll =
+      selectedSheets.includes("ALL") ||
+      (availableSheets.length > 0 && selectedSheets.length === availableSheets.length);
+    const currentSelection = isCurrentlyAll
+      ? (availableSheets.length > 0 ? [...availableSheets] : [])
+      : selectedSheets.filter((s) => s !== "ALL");
+    const isAllGroupSelected = sheetsInGroup.every((s) => currentSelection.includes(s));
     let updated: string[];
     if (isAllGroupSelected) {
-      updated = selectedSheets.filter((s) => !sheetsInGroup.includes(s) && s !== "ALL");
+      updated = currentSelection.filter((s) => !sheetsInGroup.includes(s));
       if (updated.length === 0 && availableSheets.length > 0) {
         updated = [availableSheets[0]];
       }
     } else {
-      const withoutAll = selectedSheets.filter((s) => s !== "ALL");
-      updated = Array.from(new Set([...withoutAll, ...sheetsInGroup]));
+      updated = Array.from(new Set([...currentSelection, ...sheetsInGroup]));
     }
     setSelectedSheets(updated);
     localStorage.setItem("gds_selectedSheets", JSON.stringify(updated));
@@ -717,7 +758,7 @@ export default function HomePage() {
     } else if (preset === "oct") {
       target = monthGroups.oct.length > 0 ? monthGroups.oct : availableSheets.filter((s) => s.includes("ตค") || s.includes("ต.ค."));
     } else if (preset === "all") {
-      target = ["ALL"];
+      target = availableSheets.length > 0 ? [...availableSheets] : ["ALL"];
     }
 
     if (target.length > 0) {
@@ -1072,7 +1113,7 @@ export default function HomePage() {
   });
 
   const renderDateCheckbox = (s: string) => {
-    const isChecked = selectedSheets.includes(s) && !selectedSheets.includes("ALL");
+    const isChecked = isAllSelected || selectedSheets.includes(s);
     const isLatest = s === availableSheets[0];
 
     return (
@@ -1228,8 +1269,8 @@ export default function HomePage() {
                   <span>เลือกวันที่ต้องการดูงาน</span>
                 </label>
                 <span className="text-[10px] text-[#007AFF] font-semibold bg-[#007AFF]/10 border border-[#007AFF]/20 px-2 py-0.5 rounded-full">
-                  {selectedSheets.includes("ALL")
-                    ? "ทุกวัน (ALL)"
+                  {isAllSelected
+                    ? `ทุกวัน (ALL - ${availableSheets.length || 52} วัน)`
                     : `เลือกแล้ว ${selectedSheets.length} วัน`}
                 </span>
               </div>
@@ -1244,8 +1285,10 @@ export default function HomePage() {
                 <span className="truncate pr-1">
                   {isMetadataLoading ? (
                     <span className="text-[#8E8E93]">กำลังดึงวันที่...</span>
-                  ) : selectedSheets.includes("ALL") ? (
-                    <span className="text-[#007AFF] font-bold">ทุกวันที่ (ALL)</span>
+                  ) : isAllSelected ? (
+                    <span className="text-[#007AFF] font-bold">
+                      ทุกวันที่ (ALL - {availableSheets.length || 52} วัน)
+                    </span>
                   ) : selectedSheets.length === 0 ? (
                     <span className="text-[#8E8E93]">เลือกวันที่...</span>
                   ) : selectedSheets.length <= 2 ? (
@@ -1275,7 +1318,7 @@ export default function HomePage() {
                       <span>เลือกวันที่</span>
                     </span>
                     <span className="text-[10px] text-[#007AFF] bg-[#007AFF]/10 border border-[#007AFF]/20 px-2 py-0.5 rounded-full font-semibold">
-                      {selectedSheets.includes("ALL")
+                      {isAllSelected
                         ? "ทุกวันที่"
                         : `${selectedSheets.length} วัน`}
                     </span>
@@ -1287,7 +1330,7 @@ export default function HomePage() {
                       type="button"
                       onClick={() => handleSelectPreset("today")}
                       className={`px-2 py-1.5 text-xs font-semibold rounded-xl text-center transition-all cursor-pointer ${
-                        selectedSheets.length === 1 && selectedSheets[0] === availableSheets[0]
+                        !isAllSelected && selectedSheets.length === 1 && selectedSheets[0] === availableSheets[0]
                           ? "bg-[#007AFF] text-white shadow-xs"
                           : "bg-[#767680]/[0.08] text-[#1C1C1E] hover:bg-[#767680]/[0.14]"
                       }`}
@@ -1298,7 +1341,7 @@ export default function HomePage() {
                       type="button"
                       onClick={() => handleSelectPreset("last3")}
                       className={`px-2 py-1.5 text-xs font-semibold rounded-xl text-center transition-all cursor-pointer ${
-                        selectedSheets.length === 3 && !selectedSheets.includes("ALL")
+                        !isAllSelected && selectedSheets.length === 3
                           ? "bg-[#007AFF] text-white shadow-xs"
                           : "bg-[#767680]/[0.08] text-[#1C1C1E] hover:bg-[#767680]/[0.14]"
                       }`}
@@ -1309,7 +1352,7 @@ export default function HomePage() {
                       type="button"
                       onClick={() => handleSelectPreset("nov")}
                       className={`px-2 py-1.5 text-xs font-semibold rounded-xl text-center transition-all cursor-pointer ${
-                        !selectedSheets.includes("ALL") &&
+                        !isAllSelected &&
                         monthGroups.nov.length > 0 &&
                         monthGroups.nov.every((s) => selectedSheets.includes(s)) &&
                         selectedSheets.length === monthGroups.nov.length
@@ -1323,7 +1366,7 @@ export default function HomePage() {
                       type="button"
                       onClick={() => handleSelectPreset("oct")}
                       className={`px-2 py-1.5 text-xs font-semibold rounded-xl text-center transition-all cursor-pointer ${
-                        !selectedSheets.includes("ALL") &&
+                        !isAllSelected &&
                         monthGroups.oct.length > 0 &&
                         monthGroups.oct.every((s) => selectedSheets.includes(s)) &&
                         selectedSheets.length === monthGroups.oct.length
@@ -1338,12 +1381,12 @@ export default function HomePage() {
                     type="button"
                     onClick={() => handleSelectPreset("all")}
                     className={`w-full py-1.5 text-xs font-semibold rounded-xl text-center transition-all cursor-pointer mb-2.5 ${
-                      selectedSheets.includes("ALL")
+                      isAllSelected
                         ? "bg-[#007AFF] text-white shadow-xs"
                         : "bg-[#767680]/[0.08] text-[#1C1C1E] hover:bg-[#767680]/[0.14]"
                     }`}
                   >
-                    ทุกวันที่ทุกเดือน (ALL - 52 วัน)
+                    ทุกวันที่ทุกเดือน (ALL - {availableSheets.length > 0 ? `${availableSheets.length} วัน` : "52 วัน"})
                   </button>
 
                   {/* Scrollable Date Checkbox List Grouped by Month */}
@@ -1629,11 +1672,7 @@ export default function HomePage() {
                 <span>เลือกวันล่าสุด ({availableSheets[0] || "วันล่าสุด"})</span>
               </button>
               <button
-                onClick={() => {
-                  setSelectedSheets(["ALL"]);
-                  localStorage.setItem("gds_selectedSheets", JSON.stringify(["ALL"]));
-                  fetchTasks(assignee, ["ALL"], false);
-                }}
+                onClick={() => handleSelectPreset("all")}
                 className="px-4 py-2 bg-[#E5E5EA] text-[#1C1C1E] hover:bg-[#D1D1D6] active:scale-95 text-xs font-semibold rounded-full transition-all inline-flex items-center gap-1.5 cursor-pointer"
               >
                 <Search className="w-3.5 h-3.5 text-[#1C1C1E]" />
@@ -1673,11 +1712,7 @@ export default function HomePage() {
                 ลองตรวจสอบชื่อผู้รับงาน หรือเลือก <b>&quot;ทุกวันที่ (ค้นหางานค้างข้ามแท็บ)&quot;</b> เพื่อค้นหา
               </p>
               <button
-                onClick={() => {
-                  setSelectedSheets(["ALL"]);
-                  localStorage.setItem("gds_selectedSheets", JSON.stringify(["ALL"]));
-                  fetchTasks(assignee, ["ALL"]);
-                }}
+                onClick={() => handleSelectPreset("all")}
                 className="mt-4 px-4 py-2 bg-[#007AFF] text-white hover:bg-[#0066D6] active:scale-95 text-xs font-semibold rounded-full shadow-xs transition-all inline-flex items-center gap-1.5 cursor-pointer"
               >
                 <Search className="w-3.5 h-3.5" />
