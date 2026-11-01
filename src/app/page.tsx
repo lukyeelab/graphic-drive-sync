@@ -22,6 +22,7 @@ import {
   Edit3,
   Globe,
   Copy,
+  Check,
   ChevronDown,
   ChevronUp,
   Loader2,
@@ -139,6 +140,120 @@ function getThaiDayOfWeekInfo(dateStr: string): ThaiDayColor | null {
   return null;
 }
 
+const THAI_MONTH_TO_NUM: Record<string, string> = {
+  มค: "01", "ม.ค.": "01", มกรา: "01", มกราคม: "01",
+  กพ: "02", "ก.พ.": "02", กุมภา: "02", กุมภาพันธ์: "02",
+  มีค: "03", "มี.ค.": "03", มีนา: "03", มีนาคม: "03",
+  เมย: "04", "เม.ย.": "04", เมษา: "04", เมษายน: "04",
+  พค: "05", "พ.ค.": "05", พฤษภา: "05", พฤษภาคม: "05",
+  มิย: "06", "มิ.ย.": "06", มิถุนา: "06", มิถุนายน: "06",
+  กค: "07", "ก.ค.": "07", กรกฎา: "07", กรกฎาคม: "07",
+  สค: "08", "ส.ค.": "08", สิงหา: "08", สิงหาคม: "08",
+  กย: "09", "ก.ย.": "09", กันยา: "09", กันยายน: "09",
+  ตค: "10", "ต.ค.": "10", ตุลา: "10", ตุลาคม: "10",
+  พย: "11", "พ.ย.": "11", พฤศจิกา: "11", พฤศจิกายน: "11",
+  ธค: "12", "ธ.ค.": "12", ธันวา: "12", ธันวาคม: "12",
+};
+
+function getCategoryEmoji(category: string): string {
+  const cat = (category || "").trim().toLowerCase();
+  if (cat.includes("บอล") || cat.includes("football")) return "⚽️";
+  if (cat.includes("หวย") || cat.includes("apb")) return "🎱";
+  if (cat.includes("slot") || cat.includes("สล็อต")) return "🎰";
+  if (cat.includes("มวย") || cat.includes("box")) return "🥊";
+  if (cat.includes("วัว") || cat.includes("cow")) return "🐮";
+  if (cat.includes("ไก่") || cat.includes("cock")) return "🐔";
+  if (cat.includes("casino") || cat.includes("คาสิโน")) return "🎲";
+  if (cat.includes("กีฬา") || cat.includes("sport")) return "⚾️";
+  if (cat.includes("news") || cat.includes("ufa")) return "🆕";
+  if (cat.includes("แคมเปญ") || cat.includes("campaign")) return "🎯";
+  if (cat.includes("กิจกรรม")) return "🎪";
+  if (cat.includes("pretty")) return "✨";
+  return "📁";
+}
+
+function formatWorkReportDate(dateSheet: string, sampleAssignDate?: string): string {
+  if (sampleAssignDate && typeof sampleAssignDate === "string") {
+    const cleanAssign = sampleAssignDate.trim();
+    const m = cleanAssign.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
+    if (m) {
+      const d = m[1];
+      const mo = m[2].padStart(2, "0");
+      let yr = m[3];
+      if (yr.length === 4) {
+        let yNum = parseInt(yr, 10);
+        if (yNum > 2500) yNum -= 543;
+        yr = (yNum + 543).toString().slice(-2);
+      }
+      return `${d}/${mo}/${yr}`;
+    }
+  }
+
+  const slashMatch = dateSheet.trim().match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.]?(\d{2,4})?$/);
+  if (slashMatch) {
+    const d = slashMatch[1];
+    const mo = slashMatch[2].padStart(2, "0");
+    let yr = slashMatch[3];
+    if (!yr) {
+      yr = (new Date().getFullYear() + 543).toString().slice(-2);
+    } else if (yr.length === 4) {
+      let yNum = parseInt(yr, 10);
+      if (yNum > 2500) yNum -= 543;
+      yr = (yNum + 543).toString().slice(-2);
+    }
+    return `${d}/${mo}/${yr}`;
+  }
+
+  const thaiMatch = dateSheet.trim().match(/^(\d{1,2})\s*([^\d\s]+)?(?:\s*(\d{2,4}))?/);
+  if (thaiMatch) {
+    const d = thaiMatch[1];
+    const monthStr = (thaiMatch[2] || "").trim();
+    const mo = THAI_MONTH_TO_NUM[monthStr] || "11";
+    let yr = thaiMatch[3];
+    if (!yr) {
+      yr = (new Date().getFullYear() + 543).toString().slice(-2);
+    } else if (yr.length === 4) {
+      let yNum = parseInt(yr, 10);
+      if (yNum > 2500) yNum -= 543;
+      yr = (yNum + 543).toString().slice(-2);
+    }
+    return `${d}/${mo}/${yr}`;
+  }
+
+  return dateSheet;
+}
+
+function buildCategoryEmojiSummary(tasks: Task[]): string {
+  const catMap = new Map<string, string[]>();
+
+  tasks.forEach((t) => {
+    const emoji = getCategoryEmoji(t.category);
+    const noRaw = t.no !== undefined && t.no !== null ? String(t.no).trim() : "";
+    if (!noRaw || noRaw === "-") return;
+
+    if (!catMap.has(emoji)) {
+      catMap.set(emoji, []);
+    }
+    const list = catMap.get(emoji)!;
+    if (!list.includes(noRaw)) {
+      list.push(noRaw);
+    }
+  });
+
+  const parts: string[] = [];
+  catMap.forEach((numbers, emoji) => {
+    const sorted = [...numbers].sort((a, b) => {
+      const numA = parseFloat(a);
+      const numB = parseFloat(b);
+      if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+      return a.localeCompare(b);
+    });
+    parts.push(`${emoji}${sorted.join(".")}`);
+  });
+
+  return parts.join(" ");
+}
+
 export default function HomePage() {
   const [assignee, setAssignee] = useState<string>("ลูกหยี");
   const [selectedSheets, setSelectedSheets] = useState<string[]>([]);
@@ -195,6 +310,7 @@ export default function HomePage() {
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [showGuide, setShowGuide] = useState<boolean>(false);
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
+  const [copiedDateSheet, setCopiedDateSheet] = useState<string | null>(null);
   const [syncResult, setSyncResult] = useState<{
     success: boolean;
     message: string;
@@ -274,6 +390,79 @@ export default function HomePage() {
     navigator.clipboard.writeText(url);
     setCopiedLink(label);
     setTimeout(() => setCopiedLink(null), 2000);
+  };
+
+  // สร้างข้อความสรุปส่งงานเข้าแชท
+  const generateWorkReportMessage = (targetDateSheet: string): string => {
+    // ดึงงานทั้งหมดของวันที่นี้ (รวมงานที่เสร็จแล้วและยังไม่เสร็จ)
+    const allSheetTasks =
+      clientSheetCacheRef.current[targetDateSheet] ||
+      tasks.filter((t) => t.sheetName === targetDateSheet) ||
+      [];
+
+    const currentAssignee = (assignee || "").trim();
+    const isSpecificStaff = currentAssignee && currentAssignee !== "ALL";
+
+    const sampleTask = allSheetTasks[0] || tasks[0];
+    const formattedDate = formatWorkReportDate(targetDateSheet, sampleTask?.assignDate);
+
+    const staffSummaryLines: string[] = [];
+
+    if (isSpecificStaff) {
+      const staffTasks = allSheetTasks.filter((t) =>
+        (t.assignee || "").toLowerCase().includes(currentAssignee.toLowerCase())
+      );
+      const catSummary = buildCategoryEmojiSummary(staffTasks);
+      staffSummaryLines.push(`${currentAssignee} : ${catSummary || "-"}`);
+    } else {
+      const staffMap = new Map<string, Task[]>();
+      allSheetTasks.forEach((t) => {
+        const name = (t.assignee || "").trim();
+        if (!name || name === "-" || name === "ผู้รับงาน") return;
+        if (!staffMap.has(name)) staffMap.set(name, []);
+        staffMap.get(name)!.push(t);
+      });
+
+      if (staffMap.size === 0) {
+        staffSummaryLines.push("ไม่พบงานที่มอบหมาย");
+      } else {
+        staffMap.forEach((sTasks, name) => {
+          const catSummary = buildCategoryEmojiSummary(sTasks);
+          staffSummaryLines.push(`${name} : ${catSummary || "-"}`);
+        });
+      }
+    }
+
+    return [
+      "✅อัปไฟล์ TH/INTER กรอกตารางเรียบร้อยครับ✅",
+      `งานใบขาย ${formattedDate}`,
+      ...staffSummaryLines,
+    ].join("\n");
+  };
+
+  // คัดลอกข้อความสรุปส่งงานเข้า Clipboard
+  const handleCopyReportMessage = async (targetDateSheet: string) => {
+    try {
+      const message = generateWorkReportMessage(targetDateSheet);
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(message);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = message;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+      setCopiedDateSheet(targetDateSheet);
+      setTimeout(() => {
+        setCopiedDateSheet((prev) => (prev === targetDateSheet ? null : prev));
+      }, 2500);
+    } catch (err) {
+      console.error("Copy failed:", err);
+    }
   };
 
   // กรองและอัปเดตงานลง State ทันทีใน Memory (0 ms)
@@ -1706,7 +1895,35 @@ export default function HomePage() {
               <p className="text-xs text-[#248A3D]/90 mt-1.5 max-w-md mx-auto leading-relaxed">
                 คุณได้สร้างโฟลเดอร์และอัปงานครบแล้วทั้ง <b>{completedTasks}</b> รายการ ไม่มีงานที่ยังค้างอยู่
               </p>
-              <div className="mt-4 flex items-center justify-center gap-2">
+              <div className="mt-4 flex items-center justify-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const targetDate =
+                      selectedSheets.length === 1 && selectedSheets[0] !== "ALL"
+                        ? selectedSheets[0]
+                        : tasks[0]?.sheetName || availableSheets[0] || "";
+                    handleCopyReportMessage(targetDate);
+                  }}
+                  className={`px-4 py-2 text-xs font-semibold rounded-full shadow-xs transition-all inline-flex items-center gap-1.5 cursor-pointer active:scale-95 ${
+                    copiedDateSheet
+                      ? "bg-[#248A3D] text-white shadow-sm"
+                      : "bg-[#007AFF] text-white hover:bg-[#0066D6]"
+                  }`}
+                  title="คัดลอกข้อความสรุปส่งงานเข้าแชท"
+                >
+                  {copiedDateSheet ? (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>คัดลอกข้อความส่งงานเรียบร้อยแล้ว!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4" />
+                      <span>คัดลอกข้อความส่งงาน</span>
+                    </>
+                  )}
+                </button>
                 <button
                   onClick={() => setPendingOnly(false)}
                   className="px-4 py-2 bg-white text-[#248A3D] hover:bg-[#34C759]/10 border border-[#34C759]/25 text-xs font-semibold rounded-full shadow-xs transition-all inline-flex items-center gap-1.5 cursor-pointer"
@@ -1805,9 +2022,34 @@ export default function HomePage() {
                     </div>
                   </div>
 
-                  <span className="text-[11px] text-[#8E8E93] font-mono">
-                    แถว #{dateTasks[0]?.row} - #{dateTasks[dateTasks.length - 1]?.row}
-                  </span>
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => handleCopyReportMessage(dateSheet)}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer shadow-2xs active:scale-95 ${
+                        copiedDateSheet === dateSheet
+                          ? "bg-[#34C759] text-white border border-[#34C759] shadow-xs"
+                          : "bg-white hover:bg-[#007AFF]/10 text-[#007AFF] border border-[#007AFF]/25 hover:border-[#007AFF]/40"
+                      }`}
+                      title={generateWorkReportMessage(dateSheet)}
+                    >
+                      {copiedDateSheet === dateSheet ? (
+                        <>
+                          <Check className="w-3.5 h-3.5" />
+                          <span>คัดลอกข้อความส่งงานแล้ว!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>คัดลอกข้อความส่งงาน</span>
+                        </>
+                      )}
+                    </button>
+
+                    <span className="text-[11px] text-[#8E8E93] font-mono hidden sm:inline">
+                      แถว #{dateTasks[0]?.row} - #{dateTasks[dateTasks.length - 1]?.row}
+                    </span>
+                  </div>
                 </div>
 
                 {/* Table for this date */}
