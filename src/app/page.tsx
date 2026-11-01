@@ -172,7 +172,106 @@ function getCategoryEmoji(category: string): string {
   return "📁";
 }
 
-function formatWorkReportDate(dateSheet: string): string {
+function parseAssignDateMonthAndYear(dateStr?: string): { month: number; yearBE: number } | null {
+  if (!dateStr) return null;
+  const clean = dateStr.trim();
+  if (!clean || clean === "-") return null;
+
+  // 1. ISO format: 2026-12-05 หรือ 2569-12-05
+  const isoMatch = clean.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+  if (isoMatch) {
+    let yr = parseInt(isoMatch[1], 10);
+    const mo = parseInt(isoMatch[2], 10);
+    if (yr < 2500) yr += 543;
+    return { month: mo, yearBE: yr };
+  }
+
+  // 2. Slash/dash format: 5/12/2569, 5/12/69, 05/12/26
+  const slashMatch = clean.match(/^(\d{1,2})[\/\-\.](\d{1,2})(?:[\/\-\.](\d{2,4}))?/);
+  if (slashMatch) {
+    const mo = parseInt(slashMatch[2], 10);
+    let yr = slashMatch[3] ? parseInt(slashMatch[3], 10) : new Date().getFullYear() + 543;
+    if (yr < 100) {
+      if (yr > 50) yr += 2500;
+      else yr += 2000 + 543;
+    } else if (yr < 2500) {
+      yr += 543;
+    }
+    return { month: mo, yearBE: yr };
+  }
+
+  // 3. Thai text format: 5 ธ.ค. 69, 5 ธันวาคม 2569
+  const thaiMatch = clean.match(/^(\d{1,2})\s*([^\d\s]+)?(?:\s*(\d{2,4}))?/);
+  if (thaiMatch) {
+    const rawMonth = (thaiMatch[2] || "").replace(/\./g, "").trim();
+    const moStr = THAI_MONTH_TO_NUM[rawMonth];
+    if (moStr) {
+      const mo = parseInt(moStr, 10);
+      let yrStr = thaiMatch[3];
+      let yr = new Date().getFullYear() + 543;
+      if (yrStr) {
+        let yNum = parseInt(yrStr, 10);
+        if (yNum < 100) {
+          if (yNum > 50) yr = 2500 + yNum;
+          else yr = 2000 + 543 + yNum;
+        } else if (yNum < 2500) {
+          yr = yNum + 543;
+        } else {
+          yr = yNum;
+        }
+      }
+      return { month: mo, yearBE: yr };
+    }
+  }
+
+  // 4. Standard Date parsing
+  const d = new Date(clean);
+  if (!isNaN(d.getTime())) {
+    let yr = d.getFullYear();
+    if (yr < 2500) yr += 543;
+    return { month: d.getMonth() + 1, yearBE: yr };
+  }
+
+  return null;
+}
+
+function resolveSmartYear(targetMonthNum: number, explicitYear?: string, sampleAssignDate?: string): string {
+  // 1. ถ้ามีปีระบุไว้ในชื่อชีท ให้ยึดตามที่ระบุเป็นหลัก
+  if (explicitYear) {
+    if (explicitYear.length === 4) {
+      let yNum = parseInt(explicitYear, 10);
+      if (yNum > 2500) yNum -= 543;
+      return (yNum + 543).toString().slice(-2);
+    } else if (explicitYear.length > 2) {
+      return explicitYear.slice(-2);
+    }
+    return explicitYear;
+  }
+
+  // 2. หาปีและเดือนอ้างอิงจากวันที่จ่ายงาน (ถ้ามี) หรือเวลาปัจจุบัน
+  let baseYearBE = new Date().getFullYear() + 543;
+  let baseMonth = new Date().getMonth() + 1;
+
+  const parsedAssign = parseAssignDateMonthAndYear(sampleAssignDate);
+  if (parsedAssign) {
+    baseYearBE = parsedAssign.yearBE;
+    baseMonth = parsedAssign.month;
+  }
+
+  // 3. ตรวจจับการข้ามปีอัจฉริยะ (Cross-Year Smart Detection)
+  // 3.1 ทำงานล่วงหน้าข้ามปี: จ่ายงาน/ทำปลายปี (ต.ค.-ธ.ค. เดือน 10-12) แต่งานเป็นต้นปี (ม.ค.-มี.ค. เดือน 1-3) -> ปัดเป็นปีถัดไป (+1)
+  if (baseMonth >= 10 && targetMonthNum <= 3) {
+    return (baseYearBE + 1).toString().slice(-2);
+  }
+  // 3.2 ตรวจงานย้อนหลังข้ามปี: ปัจจุบันอยู่ต้นปี (ม.ค.-มี.ค. เดือน 1-3) แต่เปิดดูงานปลายปี (ต.ค.-ธ.ค. เดือน 10-12) -> ปัดเป็นปีก่อนหน้า (-1)
+  if (baseMonth <= 3 && targetMonthNum >= 10) {
+    return (baseYearBE - 1).toString().slice(-2);
+  }
+
+  return baseYearBE.toString().slice(-2);
+}
+
+function formatWorkReportDate(dateSheet: string, sampleAssignDate?: string): string {
   if (!dateSheet) return "";
   const clean = dateSheet.trim();
 
@@ -181,36 +280,18 @@ function formatWorkReportDate(dateSheet: string): string {
   if (slashMatch) {
     const d = slashMatch[1].padStart(2, "0");
     const mo = slashMatch[2].padStart(2, "0");
-    let yr = slashMatch[3];
-    if (!yr) {
-      yr = (new Date().getFullYear() + 543).toString().slice(-2);
-    } else if (yr.length === 4) {
-      let yNum = parseInt(yr, 10);
-      if (yNum > 2500) yNum -= 543;
-      yr = (yNum + 543).toString().slice(-2);
-    } else if (yr.length > 2) {
-      yr = yr.slice(-2);
-    }
+    const yr = resolveSmartYear(parseInt(mo, 10), slashMatch[3], sampleAssignDate);
     return `${d}/${mo}/${yr}`;
   }
 
-  // 2. กรณีเป็นชื่อแท็บภาษาไทย เช่น "13 พย", "13 พ.ย.", "13 พ.ย. 69", "1 พย", "31 ตค"
+  // 2. กรณีเป็นชื่อแท็บภาษาไทย เช่น "13 พย", "13 พ.ย.", "13 พ.ย. 69", "1 พย", "31 ตค", "13 มค"
   const thaiMatch = clean.match(/^(\d{1,2})\s*([^\d\s]+)?(?:\s*(\d{2,4}))?/);
   if (thaiMatch) {
     const d = thaiMatch[1].padStart(2, "0");
     const rawMonth = (thaiMatch[2] || "").trim();
     const cleanMonth = rawMonth.replace(/\./g, "").trim();
     const mo = THAI_MONTH_TO_NUM[cleanMonth] || THAI_MONTH_TO_NUM[rawMonth] || "11";
-    let yr = thaiMatch[3];
-    if (!yr) {
-      yr = (new Date().getFullYear() + 543).toString().slice(-2);
-    } else if (yr.length === 4) {
-      let yNum = parseInt(yr, 10);
-      if (yNum > 2500) yNum -= 543;
-      yr = (yNum + 543).toString().slice(-2);
-    } else if (yr.length > 2) {
-      yr = yr.slice(-2);
-    }
+    const yr = resolveSmartYear(parseInt(mo, 10), thaiMatch[3], sampleAssignDate);
     return `${d}/${mo}/${yr}`;
   }
 
@@ -397,8 +478,14 @@ export default function HomePage() {
     const currentAssignee = (assignee || "").trim();
     const isSpecificStaff = currentAssignee && currentAssignee !== "ALL";
 
-    // จัดรูปแบบวันที่ตามชื่อแผ่นงาน (วันที่ sort) เสมอ เช่น 13 พย -> 13/11/69
-    const formattedDate = formatWorkReportDate(targetDateSheet);
+    // หาวันที่จ่ายงานตัวอย่าง (sampleAssignDate) จากงานในชีทนั้นเพื่อใช้อ้างอิงปี
+    const sampleTaskWithDate = allSheetTasks.find(
+      (t) => t.assignDate && t.assignDate.trim() !== "" && t.assignDate !== "-"
+    );
+    const sampleAssignDate = sampleTaskWithDate ? sampleTaskWithDate.assignDate : undefined;
+
+    // จัดรูปแบบวันที่ตามชื่อแผ่นงาน (วันที่ sort) พร้อมระบบตรวจจับข้ามปีอัจฉริยะ (เช่น 13 มค ขณะทำปลายปี 69 -> 13/01/70)
+    const formattedDate = formatWorkReportDate(targetDateSheet, sampleAssignDate);
 
     const staffSummaryLines: string[] = [];
 

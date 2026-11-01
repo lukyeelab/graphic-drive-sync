@@ -40,17 +40,27 @@ function sortThaiDateSheets(sheets: string[]): string[] {
 
   return [...sheets].sort((a, b) => {
     const parse = (str: string) => {
-      const match = str.trim().match(/^(\d+)\s*([^\d\s]+)?/);
-      if (!match) return { day: 0, monthWeight: 0, raw: str };
+      const match = str.trim().match(/^(\d+)\s*([^\d\s]+)?(?:\s*(\d{2,4}))?/);
+      if (!match) return { day: 0, monthWeight: 0, year: 0, raw: str };
       const day = parseInt(match[1], 10);
       const mStr = (match[2] || "").trim();
       const monthWeight = monthWeights[mStr] || 0;
-      return { day, monthWeight, raw: str };
+      let year = 0;
+      if (match[3]) {
+        let yr = parseInt(match[3], 10);
+        if (yr > 2500) yr -= 543;
+        if (yr < 100) yr += 2000;
+        year = yr;
+      }
+      return { day, monthWeight, year, raw: str };
     };
 
     const pA = parse(a);
     const pB = parse(b);
 
+    if (pA.year !== pB.year && pA.year > 0 && pB.year > 0) {
+      return pB.year - pA.year; // ปีล่าสุดขึ้นก่อน (2570 > 2569)
+    }
     if (pA.monthWeight !== pB.monthWeight) {
       return pB.monthWeight - pA.monthWeight; // เดือนล่าสุดขึ้นก่อน (พย > ตค)
     }
