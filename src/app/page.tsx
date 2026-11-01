@@ -153,7 +153,7 @@ export default function HomePage() {
     selectedSheets.includes("ALL") ||
     (availableSheets.length > 0 && selectedSheets.length === availableSheets.length);
   const sheetName = isAllSelected
-    ? `ทุกวันที่ (ALL - ${availableSheets.length || 52} วัน)`
+    ? "ทุกวัน (All)"
     : selectedSheets.length > 0
     ? selectedSheets.join(", ")
     : "";
@@ -427,7 +427,7 @@ export default function HomePage() {
               const parsed = JSON.parse(savedSheetsJson);
               if (Array.isArray(parsed) && parsed.length > 0) {
                 if (parsed.includes("ALL") || parsed.length === data.sheetNames.length) {
-                  initialSelected = [...data.sheetNames];
+                  initialSelected = ["ALL"];
                 } else {
                   initialSelected = parsed.filter(
                     (s: string) => data.sheetNames.includes(s)
@@ -437,16 +437,20 @@ export default function HomePage() {
             } catch {}
           }
 
-          // ถ้ายังไม่มีค่าบันทึกไว้ ให้เลือก 3 วันล่าสุดเป็นค่าเริ่มต้น
+          // ถ้ายังไม่มีค่าบันทึกไว้ ให้เลือก "ALL" เป็นค่าเริ่มต้น
           if (initialSelected.length === 0) {
-            initialSelected = data.sheetNames.slice(0, 3);
+            initialSelected = ["ALL"];
           }
 
           setSelectedSheets(initialSelected);
 
+          const targetSheetsList = initialSelected.includes("ALL")
+            ? data.sheetNames
+            : initialSelected;
+
           // แสดงผลชุดข้อมูลที่มีใน IndexedDB ขึ้นหน้าจอทันทีใน 0ms!
-          const cachedInitial = initialSelected.flatMap(
-            (s) => clientSheetCacheRef.current[s] || []
+          const cachedInitial = targetSheetsList.flatMap(
+            (s: string) => clientSheetCacheRef.current[s] || []
           );
           if (cachedInitial.length > 0) {
             applyTasksToState(cachedInitial, initialAssignee);
@@ -689,27 +693,32 @@ export default function HomePage() {
   const handleToggleSheet = (sheet: string) => {
     let updated: string[];
     if (sheet === "ALL") {
-      updated = availableSheets.length > 0 ? [...availableSheets] : ["ALL"];
+      updated = ["ALL"];
     } else {
       const isCurrentlyAll =
         selectedSheets.includes("ALL") ||
         (availableSheets.length > 0 && selectedSheets.length === availableSheets.length);
-      const currentSelection = isCurrentlyAll
-        ? (availableSheets.length > 0 ? [...availableSheets] : [])
-        : selectedSheets.filter((s) => s !== "ALL");
 
-      if (currentSelection.includes(sheet)) {
-        updated = currentSelection.filter((s) => s !== sheet);
-        if (updated.length === 0 && availableSheets.length > 0) {
-          updated = [availableSheets[0]];
-        }
+      // ถ้าเดิมอยู่โหมด ทุกวัน (All) แล้วคลิกเลือกวันที่ ให้เริ่มเลือกเฉพาะวันนั้นทันที
+      if (isCurrentlyAll) {
+        updated = [sheet];
       } else {
-        updated = [...currentSelection, sheet];
+        if (selectedSheets.includes(sheet)) {
+          updated = selectedSheets.filter((s) => s !== sheet);
+          if (updated.length === 0) {
+            updated = ["ALL"]; // ถ้ายกเลิกจนหมด ให้กลับสู่ ทุกวัน (All)
+          }
+        } else {
+          updated = [...selectedSheets, sheet];
+        }
       }
     }
     setSelectedSheets(updated);
     localStorage.setItem("gds_selectedSheets", JSON.stringify(updated));
-    const allCached = updated.flatMap((s) => clientSheetCacheRef.current[s] || []);
+    const targetSheetsList = updated.includes("ALL")
+      ? (availableSheets.length > 0 ? availableSheets : [])
+      : updated;
+    const allCached = targetSheetsList.flatMap((s) => clientSheetCacheRef.current[s] || []);
     if (allCached.length > 0) {
       applyTasksToState(allCached, assignee);
     }
@@ -722,29 +731,30 @@ export default function HomePage() {
     const isCurrentlyAll =
       selectedSheets.includes("ALL") ||
       (availableSheets.length > 0 && selectedSheets.length === availableSheets.length);
-    const currentSelection = isCurrentlyAll
-      ? (availableSheets.length > 0 ? [...availableSheets] : [])
-      : selectedSheets.filter((s) => s !== "ALL");
+    const currentSelection = isCurrentlyAll ? [] : selectedSheets.filter((s) => s !== "ALL");
     const isAllGroupSelected = sheetsInGroup.every((s) => currentSelection.includes(s));
     let updated: string[];
     if (isAllGroupSelected) {
       updated = currentSelection.filter((s) => !sheetsInGroup.includes(s));
-      if (updated.length === 0 && availableSheets.length > 0) {
-        updated = [availableSheets[0]];
+      if (updated.length === 0) {
+        updated = ["ALL"];
       }
     } else {
       updated = Array.from(new Set([...currentSelection, ...sheetsInGroup]));
     }
     setSelectedSheets(updated);
     localStorage.setItem("gds_selectedSheets", JSON.stringify(updated));
-    const allCached = updated.flatMap((s) => clientSheetCacheRef.current[s] || []);
+    const targetSheetsList = updated.includes("ALL")
+      ? (availableSheets.length > 0 ? availableSheets : [])
+      : updated;
+    const allCached = targetSheetsList.flatMap((s) => clientSheetCacheRef.current[s] || []);
     if (allCached.length > 0) {
       applyTasksToState(allCached, assignee);
     }
     fetchTasks(assignee, updated, false);
   };
 
-  // Quick Presets: วันนี้, 3 วันล่าสุด, 7 วันล่าสุด, เดือน พ.ย., เดือน ต.ค., ทุกวันที่ (ALL)
+  // Quick Presets: วันนี้, 3 วันล่าสุด, 7 วันล่าสุด, เดือน พ.ย., เดือน ต.ค., ทุกวัน (All)
   const handleSelectPreset = (preset: "today" | "last3" | "last7" | "nov" | "oct" | "all") => {
     let target: string[] = [];
     if (preset === "today") {
@@ -758,13 +768,16 @@ export default function HomePage() {
     } else if (preset === "oct") {
       target = monthGroups.oct.length > 0 ? monthGroups.oct : availableSheets.filter((s) => s.includes("ตค") || s.includes("ต.ค."));
     } else if (preset === "all") {
-      target = availableSheets.length > 0 ? [...availableSheets] : ["ALL"];
+      target = ["ALL"];
     }
 
     if (target.length > 0) {
       setSelectedSheets(target);
       localStorage.setItem("gds_selectedSheets", JSON.stringify(target));
-      const allCached = target.flatMap((s) => clientSheetCacheRef.current[s] || []);
+      const targetSheetsList = target.includes("ALL")
+        ? (availableSheets.length > 0 ? availableSheets : [])
+        : target;
+      const allCached = targetSheetsList.flatMap((s) => clientSheetCacheRef.current[s] || []);
       if (allCached.length > 0) {
         applyTasksToState(allCached, assignee);
       }
@@ -1113,7 +1126,7 @@ export default function HomePage() {
   });
 
   const renderDateCheckbox = (s: string) => {
-    const isChecked = isAllSelected || selectedSheets.includes(s);
+    const isChecked = !isAllSelected && selectedSheets.includes(s);
     const isLatest = s === availableSheets[0];
 
     return (
@@ -1270,7 +1283,7 @@ export default function HomePage() {
                 </label>
                 <span className="text-[10px] text-[#007AFF] font-semibold bg-[#007AFF]/10 border border-[#007AFF]/20 px-2 py-0.5 rounded-full">
                   {isAllSelected
-                    ? `ทุกวัน (ALL - ${availableSheets.length || 52} วัน)`
+                    ? "ทุกวัน (All)"
                     : `เลือกแล้ว ${selectedSheets.length} วัน`}
                 </span>
               </div>
@@ -1287,7 +1300,7 @@ export default function HomePage() {
                     <span className="text-[#8E8E93]">กำลังดึงวันที่...</span>
                   ) : isAllSelected ? (
                     <span className="text-[#007AFF] font-bold">
-                      ทุกวันที่ (ALL - {availableSheets.length || 52} วัน)
+                      ทุกวัน (All)
                     </span>
                   ) : selectedSheets.length === 0 ? (
                     <span className="text-[#8E8E93]">เลือกวันที่...</span>
@@ -1319,7 +1332,7 @@ export default function HomePage() {
                     </span>
                     <span className="text-[10px] text-[#007AFF] bg-[#007AFF]/10 border border-[#007AFF]/20 px-2 py-0.5 rounded-full font-semibold">
                       {isAllSelected
-                        ? "ทุกวันที่"
+                        ? "ทุกวัน (All)"
                         : `${selectedSheets.length} วัน`}
                     </span>
                   </div>
@@ -1386,7 +1399,7 @@ export default function HomePage() {
                         : "bg-[#767680]/[0.08] text-[#1C1C1E] hover:bg-[#767680]/[0.14]"
                     }`}
                   >
-                    ทุกวันที่ทุกเดือน (ALL - {availableSheets.length > 0 ? `${availableSheets.length} วัน` : "52 วัน"})
+                    ทุกวัน (All)
                   </button>
 
                   {/* Scrollable Date Checkbox List Grouped by Month */}
@@ -1556,7 +1569,7 @@ export default function HomePage() {
                 <span>แสดงเฉพาะงานที่ยังไม่เสร็จ</span>
               </button>
 
-              {!selectedSheets.includes("ALL") && selectedSheets.length > 0 && (
+              {!isAllSelected && selectedSheets.length > 0 && !selectedSheets.includes("ALL") && (
                 <div className="flex items-center flex-wrap gap-1.5 text-xs text-[#8E8E93]">
                   <span className="font-semibold text-[#1C1C1E] shrink-0">กำลังดู:</span>
                   <div className="flex items-center flex-wrap gap-1.5">
@@ -1676,7 +1689,7 @@ export default function HomePage() {
                 className="px-4 py-2 bg-[#E5E5EA] text-[#1C1C1E] hover:bg-[#D1D1D6] active:scale-95 text-xs font-semibold rounded-full transition-all inline-flex items-center gap-1.5 cursor-pointer"
               >
                 <Search className="w-3.5 h-3.5 text-[#1C1C1E]" />
-                <span>ดูทุกวันที่ (ALL)</span>
+                <span>ดูทุกวัน (All)</span>
               </button>
             </div>
           </section>
@@ -1709,14 +1722,14 @@ export default function HomePage() {
                 ไม่พบงานที่มอบหมายให้ &quot;{assignee}&quot; ในแผ่นงาน {sheetName}
               </h4>
               <p className="text-xs text-[#8E8E93] mt-1">
-                ลองตรวจสอบชื่อผู้รับงาน หรือเลือก <b>&quot;ทุกวันที่ (ค้นหางานค้างข้ามแท็บ)&quot;</b> เพื่อค้นหา
+                ลองตรวจสอบชื่อผู้รับงาน หรือเลือก <b>&quot;ทุกวัน (All)&quot;</b> เพื่อค้นหา
               </p>
               <button
                 onClick={() => handleSelectPreset("all")}
                 className="mt-4 px-4 py-2 bg-[#007AFF] text-white hover:bg-[#0066D6] active:scale-95 text-xs font-semibold rounded-full shadow-xs transition-all inline-flex items-center gap-1.5 cursor-pointer"
               >
                 <Search className="w-3.5 h-3.5" />
-                <span>ค้นหางานข้ามทุกวันที่ (ALL)</span>
+                <span>ค้นหางานทุกวัน (All)</span>
               </button>
             </section>
           )
