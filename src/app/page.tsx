@@ -1219,10 +1219,11 @@ export default function HomePage() {
               <span>สร้างโฟลเดอร์ล่วงหน้า</span>
             </button>
             <a
-              href="https://docs.google.com/spreadsheets/d/1WIm3CzQ708nHcdIFQBnQEDBHWjBGeOCQL_MEAO2rBD8/edit"
+              href="https://docs.google.com/spreadsheets/d/1QC8zcY-0Qs9FFjXxboWEKDV7h9lPI9xrtbb8tAMuEys/edit"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-[#1C1C1E] bg-[#E5E5EA] hover:bg-[#D1D1D6] rounded-full border border-black/[0.04] transition-all cursor-pointer shadow-xs active:scale-95"
+              title="เปิดไฟล์หลัก Google Sheets"
             >
               <FileSpreadsheet className="w-3.5 h-3.5 text-[#1C1C1E]" />
               <span>เปิดชีตหลัก</span>
