@@ -172,26 +172,14 @@ function getCategoryEmoji(category: string): string {
   return "📁";
 }
 
-function formatWorkReportDate(dateSheet: string, sampleAssignDate?: string): string {
-  if (sampleAssignDate && typeof sampleAssignDate === "string") {
-    const cleanAssign = sampleAssignDate.trim();
-    const m = cleanAssign.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
-    if (m) {
-      const d = m[1];
-      const mo = m[2].padStart(2, "0");
-      let yr = m[3];
-      if (yr.length === 4) {
-        let yNum = parseInt(yr, 10);
-        if (yNum > 2500) yNum -= 543;
-        yr = (yNum + 543).toString().slice(-2);
-      }
-      return `${d}/${mo}/${yr}`;
-    }
-  }
+function formatWorkReportDate(dateSheet: string): string {
+  if (!dateSheet) return "";
+  const clean = dateSheet.trim();
 
-  const slashMatch = dateSheet.trim().match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.]?(\d{2,4})?$/);
+  // 1. กรณีเป็นรูปแบบตัวเลขคั่นขีด/สแลช เช่น 13/11/69, 13/11, 13-11-2569
+  const slashMatch = clean.match(/^(\d{1,2})[\/\-\.](\d{1,2})(?:[\/\-\.](\d{2,4}))?/);
   if (slashMatch) {
-    const d = slashMatch[1];
+    const d = slashMatch[1].padStart(2, "0");
     const mo = slashMatch[2].padStart(2, "0");
     let yr = slashMatch[3];
     if (!yr) {
@@ -200,15 +188,19 @@ function formatWorkReportDate(dateSheet: string, sampleAssignDate?: string): str
       let yNum = parseInt(yr, 10);
       if (yNum > 2500) yNum -= 543;
       yr = (yNum + 543).toString().slice(-2);
+    } else if (yr.length > 2) {
+      yr = yr.slice(-2);
     }
     return `${d}/${mo}/${yr}`;
   }
 
-  const thaiMatch = dateSheet.trim().match(/^(\d{1,2})\s*([^\d\s]+)?(?:\s*(\d{2,4}))?/);
+  // 2. กรณีเป็นชื่อแท็บภาษาไทย เช่น "13 พย", "13 พ.ย.", "13 พ.ย. 69", "1 พย", "31 ตค"
+  const thaiMatch = clean.match(/^(\d{1,2})\s*([^\d\s]+)?(?:\s*(\d{2,4}))?/);
   if (thaiMatch) {
-    const d = thaiMatch[1];
-    const monthStr = (thaiMatch[2] || "").trim();
-    const mo = THAI_MONTH_TO_NUM[monthStr] || "11";
+    const d = thaiMatch[1].padStart(2, "0");
+    const rawMonth = (thaiMatch[2] || "").trim();
+    const cleanMonth = rawMonth.replace(/\./g, "").trim();
+    const mo = THAI_MONTH_TO_NUM[cleanMonth] || THAI_MONTH_TO_NUM[rawMonth] || "11";
     let yr = thaiMatch[3];
     if (!yr) {
       yr = (new Date().getFullYear() + 543).toString().slice(-2);
@@ -216,11 +208,13 @@ function formatWorkReportDate(dateSheet: string, sampleAssignDate?: string): str
       let yNum = parseInt(yr, 10);
       if (yNum > 2500) yNum -= 543;
       yr = (yNum + 543).toString().slice(-2);
+    } else if (yr.length > 2) {
+      yr = yr.slice(-2);
     }
     return `${d}/${mo}/${yr}`;
   }
 
-  return dateSheet;
+  return clean;
 }
 
 function buildCategoryEmojiSummary(tasks: Task[]): string {
@@ -403,8 +397,8 @@ export default function HomePage() {
     const currentAssignee = (assignee || "").trim();
     const isSpecificStaff = currentAssignee && currentAssignee !== "ALL";
 
-    const sampleTask = allSheetTasks[0] || tasks[0];
-    const formattedDate = formatWorkReportDate(targetDateSheet, sampleTask?.assignDate);
+    // จัดรูปแบบวันที่ตามชื่อแผ่นงาน (วันที่ sort) เสมอ เช่น 13 พย -> 13/11/69
+    const formattedDate = formatWorkReportDate(targetDateSheet);
 
     const staffSummaryLines: string[] = [];
 
