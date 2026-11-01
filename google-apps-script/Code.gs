@@ -1370,9 +1370,6 @@ function getMatchingSheetsForStaff(assignee, targetSheet) {
 
 /**
  * กวาดข้อมูลจากบนลงล่าง และหยุดทันทีเมื่อเจอแถวว่างติดต่อกันครบ 25 แถว (CONFIG.EMPTY_ROW_STREAK_LIMIT = 25)
- * - เช่น แถวสุดท้ายที่มีงานคือแถว 50 และแถวที่ 51-75 เป็นแถวว่างติดต่อกัน 25 แถว ระบบจะหยุดกวาดทันทีและตัดจบที่แถว 50
- * - ปลอดภัย 100% สำหรับแถวว่างที่คั่นระหว่างหมวดหมู่ (เช่น ว่างคั่น 1-15 แถว จะไม่ถูกตัดทิ้ง)
- * - ป้องกันกรณีมีคนเผลอพิมพ์ข้อความขยะทิ้งไว้ที่แถวล่างสุดของชีต (เช่น แถว 800) ไม่ให้ระบบต้องกวาดลงไปถึงแถว 800
  */
 function trimRowsAtFirstEmptyBoundary(rawRows) {
   if (!rawRows || rawRows.length === 0) return [];
@@ -1403,7 +1400,6 @@ function trimRowsAtFirstEmptyBoundary(rawRows) {
     } else {
       consecutiveEmpty++;
       if (consecutiveEmpty >= MAX_EMPTY_STREAK) {
-        // พบแถวว่างติดต่อกันครบ 25 แถวแล้ว หยุดกวาดต่อทันที!
         break;
       }
     }
@@ -1497,7 +1493,6 @@ function fetchSheetsValuesAndChecksumFast(spreadsheetId, sheetNames) {
 
 /**
  * ดึงเฉพาะข้อมูล Links, Smart Chips และ Notes ของคอลัมน์ F คอลัมน์เดียว (F4:F{maxRow} - ลิงก์อัปงาน TH และ Note INTER)
- * Optimized: ตัดการดึง chipRuns ของคอลัมน์ D (ใบบรีฟ) ออก ทำให้ขนาดข้อมูลเล็กลงอีก 67% และดึงเฉพาะแผ่นงานที่มีข้อมูลใน Col F เท่านั้น!
  */
 function fetchSheetsLinksGridDataFast(spreadsheetId, sheetRequests) {
   if (!sheetRequests || sheetRequests.length === 0) return null;
@@ -1762,16 +1757,20 @@ function buildSheetTasksFromHybridData(sheetName, valuesRows, colFRowData) {
 }
 
 /**
- * ดึงรายการงานตามชื่อพนักงาน (Ultra-Light Col-F Hybrid Version)
- * - ขั้นที่ 1: ดึงข้อความดิบ C4:L ของวันที่เลือก และตัดจบเมื่อเจอแถวว่างติดกัน 25 แถว (~0.12 วินาที)
- * - ขั้นที่ 2: หากแผ่นงานนั้นยังไม่มีแถวไหนวางลิงก์ในคอลัมน์ F เลย (เช่น งานยังเป็น "กำลังทำ" ทั้งหมด)
- *             ระบบจะสร้างรายการงานจากข้อความดิบทันทีใน 0ms โดยไม่ต้องยิง API ดึง Smart Chip เลยแม้แต่ครั้งเดียว!
+ * ดึงรายการงานตามชื่อพนักงาน (Ultra-Light Col-F Hybrid Version + Multi-Staff Shared Cache + IndexedDB Delta Sync)
  */
-function getStaffTasks(assignee, targetSheet, pendingOnly, force) {
+function getStaffTasks(assignee, targetSheet, pendingOnly, force, knownHashesJson) {
   const ssId = getFastSpreadsheetId();
   const scriptCache = CacheService.getScriptCache();
   const searchNameClean = cleanAssigneeName(assignee);
   const isSpecificAssignee = !!(searchNameClean && searchNameClean !== "all");
+
+  let clientKnownHashes = {};
+  if (knownHashesJson && typeof knownHashesJson === "string") {
+    try {
+      clientKnownHashes = JSON.parse(knownHashesJson) || {};
+    } catch (e) {}
+  }
 
   let rawTargetList = [];
   if (targetSheet && targetSheet !== "ALL") {
@@ -1780,7 +1779,11 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force) {
 
   const initialCacheKeys = ["INITIAL_METADATA_V6"];
   for (let i = 0; i < rawTargetList.length; i++) {
-    initialCacheKeys.push("SHEET_VER_" + getSafeB64Key(rawTargetList[i], 35));
+    const b64 = getSafeB64Key(rawTargetList[i], 35);
+    initialCacheKeys.push("SHEET_VER_" + b64);
+    if (!force) {
+      initialCacheKeys.push("LAST_HASH_" + b64);
+    }
   }
   const initialBatch = scriptCache.getAll(initialCacheKeys) || {};
 
@@ -1832,41 +1835,124 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force) {
       const sortedSheets = sortSheetNamesDesc(allSheetNames);
       const limitSheets = isSpecificAssignee ? 10 : 8;
       targetSheetNames = sortedSheets.slice(0, limitSheets);
-      const verKeys = targetSheetNames.map(s => "SHEET_VER_" + getSafeB64Key(s.trim(), 35));
-      verBatch = scriptCache.getAll(verKeys) || {};
+      const extraKeys = [];
+      for (let i = 0; i < targetSheetNames.length; i++) {
+        const b64 = getSafeB64Key(targetSheetNames[i].trim(), 35);
+        extraKeys.push("SHEET_VER_" + b64);
+        if (!force) extraKeys.push("LAST_HASH_" + b64);
+      }
+      verBatch = scriptCache.getAll(extraKeys) || {};
     }
   }
-
-  // 1. ดึงข้อความดิบ C4:L พร้อมตัดจบเมื่อเจอแถวว่างติดกัน 25 แถว
-  const fastScan = fetchSheetsValuesAndChecksumFast(ssId, targetSheetNames);
-  const liveChecksums = fastScan ? fastScan.checksumMap : null;
-  const liveValuesMap = fastScan ? fastScan.valuesMap : null;
 
   const sheetsTasksMap = {};
+  let sheetsNeedingChecksum = [];
+
+  // 0. Fast-Switch Cache Path: หากไม่ได้กดรีเฟรชบังคับ (!force)
+  if (!force) {
+    const fastCacheKeys = [];
+    const sheetToFastKey = {};
+    for (let i = 0; i < targetSheetNames.length; i++) {
+      const sName = targetSheetNames[i];
+      const b64Name = getSafeB64Key(sName.trim(), 35);
+      const lastHash = verBatch["LAST_HASH_" + b64Name];
+      const ver = verBatch["SHEET_VER_" + b64Name] || "0";
+      if (lastHash) {
+        const fKey = "FAST_TASKS_V7_" + b64Name + "_" + lastHash + "_" + ver;
+        sheetToFastKey[sName] = fKey;
+        fastCacheKeys.push(fKey);
+      }
+    }
+
+    const fastCachedData = fastCacheKeys.length > 0 ? (scriptCache.getAll(fastCacheKeys) || {}) : {};
+    for (let i = 0; i < targetSheetNames.length; i++) {
+      const sName = targetSheetNames[i];
+      const fKey = sheetToFastKey[sName];
+      if (fKey && fastCachedData[fKey]) {
+        try {
+          sheetsTasksMap[sName] = JSON.parse(fastCachedData[fKey]);
+          continue;
+        } catch (e) {}
+      }
+      sheetsNeedingChecksum.push(sName);
+    }
+  } else {
+    sheetsNeedingChecksum = targetSheetNames.slice();
+  }
+
+  // 1. กวาดข้อความดิบ C4:L เฉพาะแผ่นงานที่ยังไม่อยู่ใน Fast Cache หรือเมื่อกดปุ่มค้นหารีเฟรช (force=true)
+  let liveChecksums = null;
+  let liveValuesMap = null;
+  if (sheetsNeedingChecksum.length > 0) {
+    const fastScan = fetchSheetsValuesAndChecksumFast(ssId, sheetsNeedingChecksum);
+    liveChecksums = fastScan ? fastScan.checksumMap : null;
+    liveValuesMap = fastScan ? fastScan.valuesMap : null;
+  }
+
   const sheetsToFetchFromApi = [];
   const cacheKeyMap = {};
+  const sheetCompositeHashMap = {};
   const cacheKeysToRequest = [];
+  const hashPointerToPut = {};
 
-  for (let i = 0; i < targetSheetNames.length; i++) {
-    const sName = targetSheetNames[i];
+  for (let i = 0; i < sheetsNeedingChecksum.length; i++) {
+    const sName = sheetsNeedingChecksum[i];
     const b64Name = getSafeB64Key(sName.trim(), 35);
     const ver = verBatch["SHEET_VER_" + b64Name] || "0";
-    const hashSuffix = (liveChecksums && liveChecksums[sName]) ? ("_" + liveChecksums[sName] + "_" + ver) : "";
+    const hashVal = (liveChecksums && liveChecksums[sName]) ? liveChecksums[sName] : "";
+    const compositeHash = hashVal ? (hashVal + "_" + ver) : "";
+    const hashSuffix = compositeHash ? ("_" + compositeHash) : "";
     const key = "FAST_TASKS_V7_" + b64Name + hashSuffix;
     cacheKeyMap[sName] = key;
-    if (liveChecksums && liveChecksums[sName]) {
+    if (compositeHash) {
+      sheetCompositeHashMap[sName] = compositeHash;
+      sheetCompositeHashMap[sName.trim()] = compositeHash;
       cacheKeysToRequest.push(key);
+      hashPointerToPut["LAST_HASH_" + b64Name] = hashVal;
     }
   }
 
-  // 2. ตรวจสอบจาก Cache และคัดกรองเฉพาะแผ่นงานที่จำเป็นต้องดึงลิงก์คอลัมน์ F จริงๆ เท่านั้น
-  const cachedBatch = cacheKeysToRequest.length > 0 ? (scriptCache.getAll(cacheKeysToRequest) || {}) : {};
-  const ASSIGNEE_IDX = CONFIG.COL_ASSIGNEE - 3; // Index 7 (คอลัมน์ J)
-  const UPLOAD_IDX = CONFIG.COL_UPLOAD_LINK - 3; // Index 3 (คอลัมน์ F)
-  const directCacheToPut = {};
-
+  // เติม compositeHash สำหรับแผ่นงานที่ดึงมาจาก Fast-Switch Cache Path (ขั้นตอนที่ 0)
   for (let i = 0; i < targetSheetNames.length; i++) {
     const sName = targetSheetNames[i];
+    if (!sheetCompositeHashMap[sName]) {
+      const b64Name = getSafeB64Key(sName.trim(), 35);
+      const lastHash = verBatch["LAST_HASH_" + b64Name];
+      const ver = verBatch["SHEET_VER_" + b64Name] || "0";
+      if (lastHash) {
+        const compHash = lastHash + "_" + ver;
+        sheetCompositeHashMap[sName] = compHash;
+        sheetCompositeHashMap[sName.trim()] = compHash;
+      }
+    }
+  }
+
+  // ตรวจสอบว่ามีแผ่นงานไหนที่ข้อมูลใน IndexedDB ของหน้าบ้านตรงกับชีตปัจจุบันเป๊ะๆ อยู่แล้วบ้าง (Delta Sync)
+  const unchangedSheets = [];
+  const unchangedSet = {};
+  for (let i = 0; i < targetSheetNames.length; i++) {
+    const sName = targetSheetNames[i];
+    const currentCompHash = sheetCompositeHashMap[sName];
+    const clientHash = clientKnownHashes[sName] || clientKnownHashes[sName.trim()];
+    if (currentCompHash && clientHash && currentCompHash === clientHash) {
+      unchangedSheets.push(sName);
+      if (sName.trim() !== sName) {
+        unchangedSheets.push(sName.trim());
+      }
+      unchangedSet[sName] = true;
+      unchangedSet[sName.trim()] = true;
+    }
+  }
+
+  // 2. ตรวจสอบจาก Cache ตาม Checksum และสร้างข้อมูลของทุกคนในชีตเก็บไว้ใน Cache เสมอ
+  const cachedBatch = cacheKeysToRequest.length > 0 ? (scriptCache.getAll(cacheKeysToRequest) || {}) : {};
+  const UPLOAD_IDX = CONFIG.COL_UPLOAD_LINK - 3; // Index 3 (คอลัมน์ F)
+  const directCacheToPut = Object.assign({}, hashPointerToPut);
+
+  for (let i = 0; i < sheetsNeedingChecksum.length; i++) {
+    const sName = sheetsNeedingChecksum[i];
+    if (unchangedSet[sName]) continue;
+
     const key = cacheKeyMap[sName];
 
     if (cachedBatch[key]) {
@@ -1878,32 +1964,18 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force) {
 
     if (liveValuesMap && liveValuesMap[sName]) {
       const rows = liveValuesMap[sName];
-      let hasTargetAssignee = !isSpecificAssignee;
       let hasAnyUploadTextInSheet = false;
 
       for (let r = 0; r < rows.length; r++) {
         const row = rows[r];
         if (!row) continue;
-        if (isSpecificAssignee && !hasTargetAssignee) {
-          const cellAssignee = cleanAssigneeName(row[ASSIGNEE_IDX]);
-          if (cellAssignee && (cellAssignee === searchNameClean || cellAssignee.includes(searchNameClean))) {
-            hasTargetAssignee = true;
-          }
-        }
         const uploadVal = (row[UPLOAD_IDX] || "").toString().trim();
         if (uploadVal !== "") {
           hasAnyUploadTextInSheet = true;
+          break;
         }
       }
 
-      // กรณีที่ 1: ค้นหาชื่อพนักงานเจาะจง แล้ววันนั้นไม่มีชื่อพนักงานคนนี้เลย -> ข้ามทันทีใน 0ms!
-      if (!hasTargetAssignee) {
-        sheetsTasksMap[sName] = [];
-        continue;
-      }
-
-      // กรณีที่ 2: วันนั้นมีงานของพนักงาน แต่คอลัมน์ F (ชื่องาน/ลิงก์โฟลเดอร์) ยังว่างทุกแถว (ยังไม่มีใครวาง Smart Chip เลย)
-      // ไม่ต้องยิง spreadsheets.get เลยแม้แต่ครั้งเดียว! สร้างรายการงานจาก liveValuesMap ได้ทันทีใน 0ms!
       if (!hasAnyUploadTextInSheet) {
         const builtTasks = buildSheetTasksFromHybridData(sName, rows, []);
         sheetsTasksMap[sName] = builtTasks;
@@ -1972,11 +2044,12 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force) {
     }
   }
 
-  // 4. กรองข้อมูลใน Memory ทันที
+  // 4. กรองข้อมูลใน Memory ทันที (ข้ามแผ่นงานที่อยู่ใน unchangedSet เพราะหน้าบ้านมีใน IndexedDB แล้ว)
   const finalTasks = [];
 
   for (let i = 0; i < targetSheetNames.length; i++) {
     const sName = targetSheetNames[i];
+    if (unchangedSet[sName]) continue;
     const sheetTasks = sheetsTasksMap[sName] || [];
     for (let t = 0; t < sheetTasks.length; t++) {
       const item = sheetTasks[t];
@@ -2010,6 +2083,9 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force) {
     success: true,
     sheetName: targetSheet,
     sheets: allSheetNames,
+    fetchedSheets: targetSheetNames,
+    unchangedSheets: unchangedSheets,
+    checksums: sheetCompositeHashMap,
     assignee: assignee,
     totalFound: finalTasks.length,
     tasks: finalTasks,
@@ -2512,7 +2588,8 @@ function doGet(e) {
       const sheet = e.parameter.sheet || "";
       const pendingOnly = e.parameter.pendingOnly === "true";
       const force = e.parameter.force === "true";
-      data = getStaffTasks(assignee, sheet, pendingOnly, force);
+      const knownHashes = e.parameter.knownHashes || "";
+      data = getStaffTasks(assignee, sheet, pendingOnly, force, knownHashes);
     } else if (action === "resolveBrief") {
       const title = e.parameter.title || "";
       const slideUrl = resolveBriefSlideUrl(title);

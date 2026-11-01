@@ -236,6 +236,7 @@ export async function GET(req: NextRequest) {
 
     // กรณีดึงรายการงาน (action=getTasks)
     const isForce = searchParams.get("force") === "true";
+    const knownHashes = searchParams.get("knownHashes") || "";
     if (isForce) {
       serverTasksCache.clear();
     }
@@ -246,14 +247,17 @@ export async function GET(req: NextRequest) {
       .map((s) => s.trim())
       .filter(Boolean);
 
+    // หากมี knownHashes ให้ส่งไปตรวจสอบที่ GAS ตรงๆ โดยไม่ใช้ serverTasksCache เพื่อทำ Delta Sync ที่แม่นยำ
     const cacheKey = `tasks_${requestedSheets.sort().join(",")}_${assignee || "ALL"}_${pendingOnly}`;
     const cachedEntry = serverTasksCache.get(cacheKey);
 
-    if (!isForce && cachedEntry && Date.now() - cachedEntry.timestamp < CACHE_TTL_MS) {
+    if (!isForce && !knownHashes && cachedEntry && Date.now() - cachedEntry.timestamp < CACHE_TTL_MS) {
       return NextResponse.json(cachedEntry.data);
     }
 
     let allRawTasks: any[] = [];
+    let responseUnchangedSheets: string[] = [];
+    let responseChecksums: Record<string, string> = {};
     let isSuccess = false;
 
     // 1. กรณีเลือก "ALL" หรือไม่ได้ระบุ
@@ -265,6 +269,8 @@ export async function GET(req: NextRequest) {
       targetUrl.searchParams.set("sheet", "ALL");
       targetUrl.searchParams.set("assignee", assignee);
       targetUrl.searchParams.set("pendingOnly", "false");
+      if (isForce) targetUrl.searchParams.set("force", "true");
+      if (knownHashes) targetUrl.searchParams.set("knownHashes", knownHashes);
 
       const res = await fetch(targetUrl.toString(), {
         method: "GET",
@@ -275,32 +281,28 @@ export async function GET(req: NextRequest) {
 
       console.log(`[API /tasks] GAS fetch finished in ${Date.now() - t0}ms, status=${res.status}`);
       const responseText = await res.text();
-      console.log(`[API /tasks] GAS text length=${responseText.length}`);
       try {
         const data = JSON.parse(responseText);
-        if (data && data.success && Array.isArray(data.tasks)) {
-          allRawTasks = data.tasks;
+        if (data && data.success) {
+          if (Array.isArray(data.tasks)) allRawTasks = data.tasks;
+          if (Array.isArray(data.unchangedSheets)) responseUnchangedSheets = data.unchangedSheets;
+          if (data.checksums && typeof data.checksums === "object") responseChecksums = data.checksums;
           isSuccess = true;
         }
       } catch (e: any) {
         console.error("[API /tasks] JSON parse error:", e);
       }
     } 
-    // 2. กรณีเลือกแผ่นงานเดียว (Direct Fetch)
-    else if (requestedSheets.length === 1) {
-      const sName = requestedSheets[0];
-      const singleCacheKey = `tasks_${sName}_${assignee || "ALL"}_${pendingOnly}`;
-      const singleCached = serverTasksCache.get(singleCacheKey);
-      if (!isForce && singleCached && Date.now() - singleCached.timestamp < CACHE_TTL_MS) {
-        return NextResponse.json(singleCached.data);
-      }
-
+    // 2. กรณีเลือกแผ่นงานเดียว หรือส่งหลายแผ่นงานพร้อมกัน (รวมถึง Delta Sync)
+    else {
+      // หากมี knownHashes หรือ Force ให้ยิงรวมชุดเดียวไปที่ GAS เลยเพื่อทำ Delta Sync พร้อมกัน
       const targetUrl = new URL(gasUrl);
       targetUrl.searchParams.set("action", action);
-      targetUrl.searchParams.set("sheet", sName);
+      targetUrl.searchParams.set("sheet", requestedSheets.join(","));
       targetUrl.searchParams.set("assignee", assignee);
       targetUrl.searchParams.set("pendingOnly", "false");
       if (isForce) targetUrl.searchParams.set("force", "true");
+      if (knownHashes) targetUrl.searchParams.set("knownHashes", knownHashes);
 
       const res = await fetch(targetUrl.toString(), {
         method: "GET",
@@ -312,74 +314,14 @@ export async function GET(req: NextRequest) {
       const responseText = await res.text();
       try {
         const data = JSON.parse(responseText);
-        if (data && data.success && Array.isArray(data.tasks)) {
-          allRawTasks = data.tasks;
+        if (data && data.success) {
+          if (Array.isArray(data.tasks)) allRawTasks = data.tasks;
+          if (Array.isArray(data.unchangedSheets)) responseUnchangedSheets = data.unchangedSheets;
+          if (data.checksums && typeof data.checksums === "object") responseChecksums = data.checksums;
           isSuccess = true;
         }
-      } catch {}
-    } 
-    // 3. กรณีเลือกหลายแผ่นงานพร้อมกัน (ส่งเป็นคำขอเดียวให้ GAS จัดการ เพื่อไม่ให้ติดคิวคอขวด)
-    else {
-      const uncachedSheets = isForce
-        ? requestedSheets
-        : requestedSheets.filter((sName) => {
-            const singleKey = `tasks_${sName}_${assignee || "ALL"}_${pendingOnly}`;
-            const singleCached = serverTasksCache.get(singleKey);
-            return !singleCached || Date.now() - singleCached.timestamp >= CACHE_TTL_MS;
-          });
-
-      if (uncachedSheets.length === 0) {
-        allRawTasks = requestedSheets.flatMap((sName) => {
-          const singleKey = `tasks_${sName}_${assignee || "ALL"}_${pendingOnly}`;
-          return serverTasksCache.get(singleKey)?.data?.tasks || [];
-        });
-        isSuccess = true;
-      } else {
-        const targetUrl = new URL(gasUrl);
-        targetUrl.searchParams.set("action", action);
-        targetUrl.searchParams.set("sheet", uncachedSheets.join(","));
-        targetUrl.searchParams.set("assignee", assignee);
-        targetUrl.searchParams.set("pendingOnly", "false");
-        if (isForce) targetUrl.searchParams.set("force", "true");
-
-        const res = await fetch(targetUrl.toString(), {
-          method: "GET",
-          headers: { Accept: "application/json" },
-          redirect: "follow",
-          cache: "no-store",
-        });
-
-        const responseText = await res.text();
-        try {
-          const data = JSON.parse(responseText);
-          if (data && data.success && Array.isArray(data.tasks)) {
-            const groupedBySheet: Record<string, any[]> = {};
-            data.tasks.forEach((t: any) => {
-              if (!groupedBySheet[t.sheetName]) groupedBySheet[t.sheetName] = [];
-              groupedBySheet[t.sheetName].push(t);
-            });
-            uncachedSheets.forEach((sName) => {
-              const sTasks = groupedBySheet[sName] || [];
-              const sKey = `tasks_${sName}_${assignee || "ALL"}_${pendingOnly}`;
-              serverTasksCache.set(sKey, {
-                data: { success: true, tasks: sTasks },
-                timestamp: Date.now(),
-              });
-            });
-
-            const cachedTasks = requestedSheets
-              .filter((s) => !uncachedSheets.includes(s))
-              .flatMap((sName) => {
-                const sKey = `tasks_${sName}_${assignee || "ALL"}_${pendingOnly}`;
-                return serverTasksCache.get(sKey)?.data?.tasks || [];
-              });
-
-            allRawTasks = [...data.tasks, ...cachedTasks];
-            isSuccess = true;
-          }
-        } catch (e) {
-          console.error("[API /tasks] Multi-sheet JSON parse error:", e);
-        }
+      } catch (e) {
+        console.error("[API /tasks] JSON parse error:", e);
       }
     }
 
@@ -437,6 +379,8 @@ export async function GET(req: NextRequest) {
         success: true,
         tasks: tasks,
         totalFound: tasks.length,
+        unchangedSheets: responseUnchangedSheets,
+        checksums: responseChecksums,
       };
 
       // บันทึกเข้า Memory Cache

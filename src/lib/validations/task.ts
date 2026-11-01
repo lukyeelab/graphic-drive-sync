@@ -5,6 +5,8 @@ export const getTasksQuerySchema = z.object({
   sheet: z.string().optional(),
   assignee: z.string().optional(),
   pendingOnly: z.enum(["true", "false"]).optional(),
+  force: z.enum(["true", "false"]).optional(),
+  knownHashes: z.string().optional(),
 });
 
 export const batchTaskItemSchema = z.object({
