@@ -243,37 +243,32 @@ function parseDateFormats(sheetName) {
     return DATE_FORMAT_CACHE[cleanKey];
   }
 
-  const match = cleanKey.match(/^(\d+)\s*([^\d\s]+)?/);
+  // 1. ดักจับวัน เดือน และปี (รองรับทั้ง 2 หลักและ 4 หลัก เช่น "5 มค 70", "5 ม.ค. 2570", "5/1/2027")
+  const match = cleanKey.match(/^(\d+)\s*([^\d\s]+)?(?:\s*(\d{2,4}))?/);
   const day = match ? parseInt(match[1], 10) : 7;
   const padDay = day < 10 ? "0" + day : "" + day;
   const monthStr = match && match[2] ? match[2].trim() : "พย";
+  const explicitYearStr = match && match[3] ? match[3].trim() : "";
 
   const MONTH_LIST = [
-    { keys: ["มค", "ม.ค."], th: "ม.ค.", inter: "JAN", num: "01" },
-    { keys: ["กพ", "ก.พ."], th: "ก.พ.", inter: "FEB", num: "02" },
-    { keys: ["มีค", "มี.ค."], th: "มี.ค.", inter: "MAR", num: "03" },
-    { keys: ["เมย", "เม.ย."], th: "เม.ย.", inter: "APR", num: "04" },
-    { keys: ["พค", "พ.ค."], th: "พ.ค.", inter: "MAY", num: "05" },
-    { keys: ["มิย", "มิ.ย."], th: "มิ.ย.", inter: "JUN", num: "06" },
-    { keys: ["กค", "ก.ค."], th: "ก.ค.", inter: "JUL", num: "07" },
-    { keys: ["สค", "ส.ค."], th: "ส.ค.", inter: "AUG", num: "08" },
-    { keys: ["กย", "ก.ย."], th: "ก.ย.", inter: "SEP", num: "09" },
-    { keys: ["ตค", "ต.ค."], th: "ต.ค.", inter: "OCT", num: "10" },
-    { keys: ["พย", "พ.ย."], th: "พ.ย.", inter: "NOV", num: "11" },
-    { keys: ["ธค", "ธ.ค."], th: "ธ.ค.", inter: "DEC", num: "12" }
+    { keys: ["มค", "ม.ค.", "มกรา", "มกราคม"], th: "ม.ค.", inter: "JAN", num: "01", val: 1 },
+    { keys: ["กพ", "ก.พ.", "กุมภา", "กุมภาพันธ์"], th: "ก.พ.", inter: "FEB", num: "02", val: 2 },
+    { keys: ["มีค", "มี.ค."], th: "มี.ค.", inter: "MAR", num: "03", val: 3 },
+    { keys: ["เมย", "เม.ย.", "เมษา", "เมษายน"], th: "เม.ย.", inter: "APR", num: "04", val: 4 },
+    { keys: ["พค", "พ.ค.", "พฤษภา", "พฤษภาคม"], th: "พ.ค.", inter: "MAY", num: "05", val: 5 },
+    { keys: ["มิย", "มิ.ย.", "มิถุนา", "มิถุนายน"], th: "มิ.ย.", inter: "JUN", num: "06", val: 6 },
+    { keys: ["กค", "ก.ค.", "กรกฎา", "กรกฎาคม"], th: "ก.ค.", inter: "JUL", num: "07", val: 7 },
+    { keys: ["สค", "ส.ค.", "สิงหา", "สิงหาคม"], th: "ส.ค.", inter: "AUG", num: "08", val: 8 },
+    { keys: ["กย", "ก.ย.", "กันยา", "กันยายน"], th: "ก.ย.", inter: "SEP", num: "09", val: 9 },
+    { keys: ["ตค", "ต.ค.", "ตุลา", "ตุลาคม"], th: "ต.ค.", inter: "OCT", num: "10", val: 10 },
+    { keys: ["พย", "พ.ย.", "พฤศจิกา", "พฤศจิกายน"], th: "พ.ย.", inter: "NOV", num: "11", val: 11 },
+    { keys: ["ธค", "ธ.ค.", "ธันวา", "ธันวาคม"], th: "ธ.ค.", inter: "DEC", num: "12", val: 12 }
   ];
 
   let thMonth = "พ.ย.";
   let interMonth = "NOV";
   let numMonth = "11";
-  let thYear = "69";
-  let engYear = "2026";
-
-  try {
-    const now = new Date();
-    engYear = now.getFullYear().toString();
-    thYear = (now.getFullYear() + 543).toString().slice(-2);
-  } catch (e) {}
+  let targetMonthVal = 11;
 
   for (let i = 0; i < MONTH_LIST.length; i++) {
     const m = MONTH_LIST[i];
@@ -281,9 +276,48 @@ function parseDateFormats(sheetName) {
       thMonth = m.th;
       interMonth = m.inter;
       numMonth = m.num;
+      targetMonthVal = m.val;
       break;
     }
   }
+
+  // คำนวณปีอัจฉริยะ (Smart Cross-Year Detection)
+  let calculatedEngYear = 2026;
+  try {
+    calculatedEngYear = new Date().getFullYear();
+  } catch (e) {}
+
+  if (explicitYearStr) {
+    let y = parseInt(explicitYearStr, 10);
+    if (y > 2500) {
+      calculatedEngYear = y - 543;
+    } else if (y > 2000) {
+      calculatedEngYear = y;
+    } else if (y >= 50) {
+      // ปี พ.ศ. 2 หลัก เช่น 69, 70, 71
+      calculatedEngYear = 2500 + y - 543;
+    } else {
+      // ปี ค.ศ. 2 หลัก เช่น 26, 27
+      calculatedEngYear = 2000 + y;
+    }
+  } else {
+    // ไม่มีระบุปีในชื่อชีท: ตรวจจับการทำงานล่วงหน้าข้ามปีอัตโนมัติ
+    try {
+      const now = new Date();
+      const currentMonth = now.getMonth() + 1; // 1-12
+      // หากเดือนปัจจุบันอยู่ช่วงปลายปี (ต.ค.-ธ.ค. เดือน 10-12) แต่งานที่กำลังทำเป็นต้นปี (ม.ค.-มี.ค. เดือน 1-3)
+      if (currentMonth >= 10 && targetMonthVal <= 3) {
+        calculatedEngYear = now.getFullYear() + 1; // ปัดเป็นปีถัดไป เช่น 2026 -> 2027 (พ.ศ. 2570 / 70)
+      } else if (currentMonth <= 3 && targetMonthVal >= 10) {
+        calculatedEngYear = now.getFullYear() - 1; // ตรวจงานย้อนหลังข้ามปีก่อนหน้า
+      } else {
+        calculatedEngYear = now.getFullYear();
+      }
+    } catch (e) {}
+  }
+
+  const engYear = calculatedEngYear.toString();
+  const thYear = (calculatedEngYear + 543).toString().slice(-2);
 
   const parsedResult = {
     dayNumber: day,
@@ -1025,11 +1059,10 @@ function getMonthlyRootFolders(sheet) {
   const thDynamicNames = [
     `TH ใบขาย ${dateInfo.thMonth} ${dateInfo.interMonth} ${dateInfo.thYear}`,
     `ใบขาย ${dateInfo.thMonth} ${dateInfo.interMonth} ${dateInfo.thYear}`,
-    "TH ใบขาย พ.ย. NOV 69",
-    "ใบขาย พ.ย. NOV 69",
+    `TH ใบขาย ${dateInfo.thMonth} ${dateInfo.thYear}`,
+    `ใบขาย ${dateInfo.thMonth} ${dateInfo.thYear}`,
     `เดือน ${dateInfo.padMonth}`,
     `เดือน ${parseInt(dateInfo.padMonth, 10)}`,
-    "เดือน 11",
     `TH เดือน ${dateInfo.padMonth}`,
     `ใบขาย ${dateInfo.thMonth}`,
   ];
@@ -1037,11 +1070,8 @@ function getMonthlyRootFolders(sheet) {
     `INTER [${dateInfo.padMonth}] ${dateInfo.interMonth} ${dateInfo.engYear}`,
     `INTER  [${dateInfo.padMonth}] ${dateInfo.interMonth} ${dateInfo.engYear}`,
     `[${dateInfo.padMonth}] ${dateInfo.interMonth} ${dateInfo.engYear}`,
-    "INTER [11] NOV 2026",
-    "[11] NOV 2026",
     `M${dateInfo.padMonth}`,
     `M${parseInt(dateInfo.padMonth, 10)}`,
-    "M11",
     `INTER M${dateInfo.padMonth}`,
     `[${dateInfo.padMonth}] ${dateInfo.interMonth}`,
     `${dateInfo.padMonth} ${dateInfo.interMonth} ${dateInfo.engYear}`,
@@ -2352,16 +2382,26 @@ function createFoldersAndSyncBatch(payload) {
       autoHealMisplacedDateFolders(thFolder, interFolder, dateInfo);
     }
 
-    const thDateAliases = [sName, `${dateInfo.dayNumber} พ.ย. 69`, `${dateInfo.padDay} พย 69`, `${dateInfo.dayNumber} พย 69`];
+    const thDateAliases = [
+      sName,
+      `${dateInfo.dayNumber} ${dateInfo.thMonth} ${dateInfo.thYear}`,
+      `${dateInfo.padDay} ${dateInfo.thMonth} ${dateInfo.thYear}`,
+      `${dateInfo.dayNumber} ${dateInfo.thMonth}`,
+      `${dateInfo.padDay} ${dateInfo.thMonth}`
+    ];
     const thDateFolder = getOrCreateFolderSmart(thFolder, dateInfo.thFolderName, thDateAliases, {
       isDate: true,
       dayNumber: dateInfo.dayNumber,
-      monthKeywords: [dateInfo.thMonth, "พย", "พ.ย."]
+      monthKeywords: [dateInfo.thMonth, dateInfo.padMonth]
     });
 
     let interDateFolder = null;
     if (interFolder) {
-      const interAliases = [`NOV ${dateInfo.dayNumber},2026`, `${dateInfo.padDay} NOV 2026`, `${dateInfo.dayNumber} NOV 2026`];
+      const interAliases = [
+        `${dateInfo.interMonth} ${dateInfo.dayNumber},${dateInfo.engYear}`,
+        `${dateInfo.padDay} ${dateInfo.interMonth} ${dateInfo.engYear}`,
+        `${dateInfo.dayNumber} ${dateInfo.interMonth} ${dateInfo.engYear}`
+      ];
       interDateFolder = getOrCreateFolderSmart(interFolder, dateInfo.interFolderName, interAliases, {
         isDate: true,
         dayNumber: dateInfo.dayNumber,
@@ -2630,11 +2670,17 @@ function repairMissingThLinks(sheetName) {
 
   const { thFolder } = getMonthlyRootFolders(sheet);
   const dateInfo = parseDateFormats(sheet.getName());
-  const thDateAliases = [sheet.getName(), `${dateInfo.dayNumber} พ.ย. 69`, `${dateInfo.padDay} พย 69`];
+  const thDateAliases = [
+    sheet.getName(),
+    `${dateInfo.dayNumber} ${dateInfo.thMonth} ${dateInfo.thYear}`,
+    `${dateInfo.padDay} ${dateInfo.thMonth} ${dateInfo.thYear}`,
+    `${dateInfo.dayNumber} ${dateInfo.thMonth}`,
+    `${dateInfo.padDay} ${dateInfo.thMonth}`
+  ];
   const thDateFolder = getOrCreateFolderSmart(thFolder, dateInfo.thFolderName, thDateAliases, {
     isDate: true,
     dayNumber: dateInfo.dayNumber,
-    monthKeywords: [dateInfo.thMonth, "พย", "พ.ย."]
+    monthKeywords: [dateInfo.thMonth, dateInfo.padMonth]
   });
 
   const numRows = lastRow - CONFIG.DATA_START_ROW + 1;
@@ -2745,7 +2791,7 @@ function precreateFoldersBatch(payload) {
 
   for (let d = 0; d < days.length; d++) {
     const day = days[d];
-    const dayDateInfo = parseDateFormats(`${day} ${monthStr}`);
+    const dayDateInfo = parseDateFormats(`${day} ${monthStr} ${baseDateInfo.thYear}`);
 
     const thDateAliases = [
       `${day} ${monthStr}`,
@@ -2753,8 +2799,8 @@ function precreateFoldersBatch(payload) {
       `${dayDateInfo.padDay} ${dayDateInfo.thMonth} ${dayDateInfo.thYear}`,
       `${dayDateInfo.dayNumber} ${monthStr} ${dayDateInfo.thYear}`,
       `${dayDateInfo.padDay} ${monthStr} ${dayDateInfo.thYear}`,
-      `${dayDateInfo.dayNumber} พย 69`,
-      `${dayDateInfo.padDay} พย 69`,
+      `${dayDateInfo.dayNumber} ${monthStr}`,
+      `${dayDateInfo.padDay} ${monthStr}`,
     ];
     const thDateFolder = getOrCreateFolderSmart(thFolder, dayDateInfo.thFolderName, thDateAliases, {
       isDate: true,
