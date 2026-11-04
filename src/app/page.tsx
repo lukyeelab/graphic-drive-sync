@@ -487,13 +487,40 @@ export default function HomePage() {
     // จัดรูปแบบวันที่ตามชื่อแผ่นงาน (วันที่ sort) พร้อมระบบตรวจจับข้ามปีอัจฉริยะ (เช่น 13 มค ขณะทำปลายปี 69 -> 13/01/70)
     const formattedDate = formatWorkReportDate(targetDateSheet, sampleAssignDate);
 
+    const isTaskSelected = (t: Task) =>
+      selectedTaskKeys.includes(getTaskKey(t.sheetName || targetDateSheet, t.row));
+
+    const isTaskJustCompleted = (t: Task) =>
+      justCompletedKeys.has(getTaskKey(t.sheetName || targetDateSheet, t.row));
+
+    const getTasksToReport = (candidateTasks: Task[]): Task[] => {
+      // 1. ถ้ามีการติ๊กเลือกงานไว้ ให้สรุปเฉพาะงานที่ถูกติ๊กเลือกเท่านั้น
+      const selected = candidateTasks.filter(isTaskSelected);
+      if (selected.length > 0) {
+        return selected;
+      }
+      // 2. ถ้าเพิ่งกดสร้างโฟลเดอร์เสร็จในรอบนี้ ให้สรุปงานที่เพิ่งทำเสร็จ
+      const justCompleted = candidateTasks.filter(isTaskJustCompleted);
+      if (justCompleted.length > 0) {
+        return justCompleted;
+      }
+      // 3. ถ้ามีงานค้างอยู่แต่ผู้ใช้ไม่ได้ติ๊กเลือกเลย (หรือเอาติ๊กออกหมด) ให้เป็นค่าว่าง (-)
+      const hasPending = candidateTasks.some((t) => !t.isCompleted);
+      if (hasPending) {
+        return [];
+      }
+      // 4. กรณีทุกงานในชีตเสร็จสิ้นหมดแล้ว (เช่น อยู่หน้าเสร็จสิ้น หรือเปิดดูงานที่เสร็จแล้ว) ให้สรุปทั้งหมด
+      return candidateTasks;
+    };
+
     const staffSummaryLines: string[] = [];
 
     if (isSpecificStaff) {
       const staffTasks = allSheetTasks.filter((t) =>
         (t.assignee || "").toLowerCase().includes(currentAssignee.toLowerCase())
       );
-      const catSummary = buildCategoryEmojiSummary(staffTasks);
+      const tasksToSummarize = getTasksToReport(staffTasks);
+      const catSummary = buildCategoryEmojiSummary(tasksToSummarize);
       staffSummaryLines.push(`${currentAssignee} : ${catSummary || "-"}`);
     } else {
       const staffMap = new Map<string, Task[]>();
@@ -508,7 +535,8 @@ export default function HomePage() {
         staffSummaryLines.push("ไม่พบงานที่มอบหมาย");
       } else {
         staffMap.forEach((sTasks, name) => {
-          const catSummary = buildCategoryEmojiSummary(sTasks);
+          const tasksToSummarize = getTasksToReport(sTasks);
+          const catSummary = buildCategoryEmojiSummary(tasksToSummarize);
           staffSummaryLines.push(`${name} : ${catSummary || "-"}`);
         });
       }
