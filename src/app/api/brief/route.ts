@@ -14,16 +14,41 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const title = (searchParams.get("title") || "").trim();
     const category = (searchParams.get("category") || "").trim();
+    const force = searchParams.get("force") === "true";
 
-    if (!title) {
-      return NextResponse.redirect("https://drive.google.com/drive/my-drive", 307);
+    if (force) {
+      briefCache.clear();
     }
 
-    // 1. ตรวจสอบ In-Memory Cache ก่อนเสมอ (0ms Redirect)
-    const cached = briefCache.get(title);
-    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
-      return NextResponse.redirect(cached.url, 307);
+    if (!title || title === "-") {
+      return NextResponse.redirect("https://docs.google.com/presentation/u/0/", 307);
     }
+
+    // 0. ตรวจสอบว่าใน title หรือ url มี Google Drive/Slides File ID อยู่แล้วหรือไม่
+    const directMatch =
+      title.match(/\/d\/([-\w]{25,})/i) ||
+      title.match(/[?&]id=([-\w]{25,})/i);
+
+    if (directMatch && directMatch[1]) {
+      const slideUrl = `https://docs.google.com/presentation/d/${directMatch[1]}/edit`;
+      briefCache.set(title, { url: slideUrl, timestamp: Date.now() });
+      return NextResponse.redirect(slideUrl, 307);
+    }
+
+    // 1. ตรวจสอบ In-Memory Cache ก่อนเสมอ (0ms Redirect) หากไม่ได้ระบุ force
+    if (!force) {
+      const cached = briefCache.get(title);
+      if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+        return NextResponse.redirect(cached.url, 307);
+      }
+    }
+
+    // ทำความสะอาดชื่อคำค้นหา: ลบ extension, emoji, คำนำหน้า
+    const cleanSearch = title
+      .replace(/\.(pptx?|pdf|docx?)$/i, "")
+      .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, "")
+      .replace(/^(ใบบรีฟ|บรีฟ)\s*[:\-–—]?\s*/i, "")
+      .trim();
 
     // 2. เรียก Apps Script action=resolveBrief เพื่อค้นหาไฟล์สไลด์ใน Drive จริง
     const gasUrl = process.env.GAS_API_URL;
@@ -31,8 +56,9 @@ export async function GET(req: NextRequest) {
       try {
         const targetUrl = new URL(gasUrl);
         targetUrl.searchParams.set("action", "resolveBrief");
-        targetUrl.searchParams.set("title", title);
+        targetUrl.searchParams.set("title", cleanSearch || title);
         if (category) targetUrl.searchParams.set("category", category);
+        if (force) targetUrl.searchParams.set("force", "true");
 
         const res = await fetch(targetUrl.toString(), {
           method: "GET",
@@ -62,17 +88,15 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // 3. Fallback อัจฉริยะ: ค้นหาใน Drive โดยบังคับตัวกรองเฉพาะประเภท presentation
-    const cleanSearch = title.replace(/\.(pptx?|pdf|docx?)$/i, "").trim();
-    const presentationSearchUrl = `https://drive.google.com/drive/search?q=type:presentation%20${encodeURIComponent(
-      cleanSearch
-    )}`;
-    return NextResponse.redirect(presentationSearchUrl, 307);
+    // 3. Fallback: ถ้าหาตรงไม่เจอ ให้เปิดการค้นหาใน Google Slides โดยตรง 100%
+    const query = cleanSearch || title || category;
+    const slidesSearchUrl = `https://docs.google.com/presentation/u/0/?q=${encodeURIComponent(query)}`;
+    return NextResponse.redirect(slidesSearchUrl, 307);
   } catch (error: any) {
     if (error?.digest === "NEXT_PRERENDER_INTERRUPTED" || error?.digest?.startsWith("NEXT_")) {
       throw error;
     }
     console.error("Brief API route error:", error);
-    return NextResponse.redirect("https://drive.google.com/drive/my-drive", 307);
+    return NextResponse.redirect("https://docs.google.com/presentation/u/0/", 307);
   }
 }

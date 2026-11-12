@@ -350,17 +350,19 @@ export async function GET(req: NextRequest) {
         let briefLink = (t.briefLink || "").trim();
         let briefTitle = (t.briefTitle || "").trim();
 
-        // 1. ถ้ามี fileId ใน Google Drive อยู่แล้ว แปลงเป็น docs.google.com/presentation/d/.../edit ทันที
+        // 1. ถ้ามี fileId ใน Google Drive อยู่ใน briefLink หรือ briefTitle แปลงเป็น docs.google.com/presentation/d/.../edit ทันที
         const dMatch =
           briefLink.match(/\/d\/([-\w]{25,})/i) ||
-          briefLink.match(/[?&]id=([-\w]{25,})/i);
+          briefLink.match(/[?&]id=([-\w]{25,})/i) ||
+          briefTitle.match(/\/d\/([-\w]{25,})/i) ||
+          briefTitle.match(/[?&]id=([-\w]{25,})/i);
 
         if (dMatch && dMatch[1]) {
           briefLink = `https://docs.google.com/presentation/d/${dMatch[1]}/edit`;
         } 
         // 2. ถ้าไม่มีลิงก์ตรงๆ แต่มีชื่อใบบรีฟ ให้วิ่งผ่าน /api/brief เพื่อค้นหาและ redirect เข้า Google Slides 100%
         else if (!briefLink.startsWith("http://") && !briefLink.startsWith("https://")) {
-          if (briefTitle) {
+          if (briefTitle && briefTitle !== "-") {
             briefLink = `/api/brief?title=${encodeURIComponent(briefTitle)}&category=${encodeURIComponent(
               t.category || ""
             )}`;
@@ -372,10 +374,16 @@ export async function GET(req: NextRequest) {
           }
         }
 
+        // ปรับแต่งชื่อหัวข้อให้กระชับ ไม่แสดงเป็น URL ขนาดยาว
+        let displayTitle = briefTitle;
+        if (!displayTitle || displayTitle === "-" || displayTitle.startsWith("http://") || displayTitle.startsWith("https://")) {
+          displayTitle = "ใบบรีฟ";
+        }
+
         return {
           ...t,
           briefLink,
-          briefTitle: briefTitle || "เปิดใบบรีฟ (Google Slides)",
+          briefTitle: displayTitle,
         };
       });
 

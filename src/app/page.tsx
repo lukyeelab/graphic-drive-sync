@@ -172,6 +172,44 @@ function getCategoryEmoji(category: string): string {
   return "📁";
 }
 
+function getPresentationSlideUrl(briefLink?: string, briefTitle?: string, category?: string): string | null {
+  const link = (briefLink || "").trim();
+  const title = (briefTitle || "").trim();
+
+  // 1. ตรวจจับ Google Drive / Docs File ID จาก briefLink หรือ briefTitle
+  const match =
+    link.match(/\/d\/([-\w]{25,})/i) ||
+    link.match(/[?&]id=([-\w]{25,})/i) ||
+    title.match(/\/d\/([-\w]{25,})/i) ||
+    title.match(/[?&]id=([-\w]{25,})/i);
+
+  if (match && match[1]) {
+    return `https://docs.google.com/presentation/d/${match[1]}/edit`;
+  }
+
+  // 2. ถ้าเป็นลิงก์ Google Slides อยู่แล้ว
+  if (link.startsWith("https://docs.google.com/presentation/")) {
+    return link;
+  }
+
+  // 3. ถ้าเป็นลิงก์ http/https อื่นๆ
+  if (link.startsWith("http://") || link.startsWith("https://")) {
+    return link;
+  }
+
+  // 4. ถ้ามี path /api/brief อยู่แล้ว
+  if (link.startsWith("/api/brief")) {
+    return link;
+  }
+
+  // 5. ถ้ามีชื่อหัวข้อใบบรีฟ ให้วิ่งผ่าน /api/brief
+  if (title && title !== "-") {
+    return `/api/brief?title=${encodeURIComponent(title)}&category=${encodeURIComponent(category || "")}`;
+  }
+
+  return null;
+}
+
 function parseAssignDateMonthAndYear(dateStr?: string): { month: number; yearBE: number } | null {
   if (!dateStr) return null;
   const clean = dateStr.trim();
@@ -617,9 +655,9 @@ export default function HomePage() {
       }
     });
 
-    // อัปเดต State ตรงตามข้อมูลสดจริงจาก Google Sheets ทันที (ไม่เก็บแคชลิงก์ที่ถูกลบไปแล้ว)
+    // อัปเดต State ตรงตามข้อมูลสดจริงจาก Google Sheets ทันที (ไม่เลือกงานค้างเองอัตโนมัติ ให้ผู้ใช้เป็นผู้เลือก)
     setTaskNamesMap(nameMap);
-    setSelectedTaskKeys(pendingKeys);
+    setSelectedTaskKeys([]);
     setFolderLinksMap(incomingLinks);
   };
 
@@ -659,13 +697,6 @@ export default function HomePage() {
         }
       });
       return updated;
-    });
-
-    setSelectedTaskKeys((prev) => {
-      const newPending = filteredNew
-        .filter((t) => !t.isCompleted)
-        .map((t) => getTaskKey(t.sheetName, t.row));
-      return Array.from(new Set([...prev, ...newPending]));
     });
 
     setFolderLinksMap((prev) => {
@@ -788,6 +819,7 @@ export default function HomePage() {
 
     setErrorMessage(null);
     setSyncResult(null);
+    setSelectedTaskKeys([]);
 
     const isModeAll = sheetsArray.includes("ALL") || (availableSheets.length > 0 && sheetsArray.length === availableSheets.length);
     let targetSheetsList = sheetsArray.includes("ALL")
@@ -1120,6 +1152,25 @@ export default function HomePage() {
     setSelectedTaskKeys((prev) =>
       prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
     );
+  };
+
+  // ติ๊กเลือกหรือยกเลิกการเลือกงานทั้งหมดของวันนั้นๆ (Select All for a specific date)
+  const toggleSelectAllDateTasks = (tasksToToggle: Task[]) => {
+    const targetKeys = tasksToToggle.map((t) => getTaskKey(t.sheetName, t.row));
+    if (targetKeys.length === 0) return;
+
+    const isAllSelected = targetKeys.every((k) => selectedTaskKeys.includes(k));
+    if (isAllSelected) {
+      // ยกเลิกการเลือกงานทั้งหมดของวันนั้น
+      setSelectedTaskKeys((prev) => prev.filter((k) => !targetKeys.includes(k)));
+    } else {
+      // ติ๊กเลือกงานทั้งหมดของวันนั้น
+      setSelectedTaskKeys((prev) => {
+        const set = new Set(prev);
+        targetKeys.forEach((k) => set.add(k));
+        return Array.from(set);
+      });
+    }
   };
 
   const handleSelectAllPending = () => {
@@ -2106,6 +2157,9 @@ export default function HomePage() {
               })
               .map((dateSheet) => {
             const dateTasks = groupedTasksByDate[dateSheet];
+            const dateKeys = dateTasks.map((t) => getTaskKey(t.sheetName, t.row));
+            const isAllDateSelected = dateKeys.length > 0 && dateKeys.every((k) => selectedTaskKeys.includes(k));
+            const isSomeDateSelected = dateKeys.some((k) => selectedTaskKeys.includes(k)) && !isAllDateSelected;
 
             return (
               <section
@@ -2166,7 +2220,28 @@ export default function HomePage() {
                   <table className="w-full text-left border-separate border-spacing-0">
                     <thead>
                       <tr className="bg-[#F2F2F7] text-[11px] font-semibold text-[#8E8E93] uppercase tracking-wider">
-                        <th className="py-3.5 px-3 w-12 text-center text-[#8E8E93] border-b border-[#E5E5EA]">เลือก</th>
+                        <th className="py-3.5 px-3 w-12 text-center text-[#8E8E93] border-b border-[#E5E5EA]">
+                          <button
+                            type="button"
+                            onClick={() => toggleSelectAllDateTasks(dateTasks)}
+                            className="text-[#007AFF] focus:outline-hidden transition-transform active:scale-90 inline-flex items-center justify-center cursor-pointer"
+                            title={
+                              isAllDateSelected
+                                ? `ยกเลิกการเลือกงานวันที่ ${dateSheet} ทั้งหมด`
+                                : `เลือกงานวันที่ ${dateSheet} ทั้งหมด (${dateTasks.length} งาน)`
+                            }
+                          >
+                            {isAllDateSelected ? (
+                              <CheckSquare className="w-5 h-5 text-[#007AFF]" />
+                            ) : isSomeDateSelected ? (
+                              <div className="w-5 h-5 rounded-[4px] border-2 border-[#007AFF] bg-[#007AFF]/10 flex items-center justify-center">
+                                <div className="w-2.5 h-0.5 bg-[#007AFF] rounded-full" />
+                              </div>
+                            ) : (
+                              <Square className="w-5 h-5 text-[#D1D1D6] hover:text-[#007AFF] transition-colors" />
+                            )}
+                          </button>
+                        </th>
                         <th className="py-3.5 px-2 w-14 text-center text-[#8E8E93] border-b border-[#E5E5EA]">แถว</th>
                         <th className="py-3.5 px-3 whitespace-nowrap text-center text-[#8E8E93] border-b border-[#E5E5EA]">หมวดหมู่</th>
                         <th className="py-3.5 px-2.5 w-32 max-w-[150px] whitespace-nowrap text-center text-[#8E8E93] border-b border-[#E5E5EA]">ใบบรีฟ</th>
@@ -2238,15 +2313,12 @@ export default function HomePage() {
                             </td>
                             <td className={`py-3.5 px-2.5 w-32 max-w-[150px] text-center ${cellBorder}`} onClick={(e) => e.stopPropagation()}>
                               {(() => {
-                                const rawLink = (task.briefLink || "").trim();
-                                const titleText = (task.briefTitle || "").trim() || "ใบบรีฟ";
-                                let targetUrl: string | null = null;
-
-                                if (rawLink) {
-                                  targetUrl = rawLink;
-                                } else if (titleText && titleText !== "-") {
-                                  targetUrl = `/api/brief?title=${encodeURIComponent(titleText)}&category=${encodeURIComponent(task.category || "")}`;
-                                }
+                                const targetUrl = getPresentationSlideUrl(task.briefLink, task.briefTitle, task.category);
+                                const rawTitle = (task.briefTitle || "").trim();
+                                const titleText =
+                                  rawTitle && rawTitle !== "-" && !rawTitle.startsWith("http://") && !rawTitle.startsWith("https://")
+                                    ? rawTitle
+                                    : "ใบบรีฟ";
 
                                 if (targetUrl) {
                                   return (

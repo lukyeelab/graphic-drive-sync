@@ -610,6 +610,35 @@ function findDriveFileOrFolderUrl(title) {
     }
   }
 
+  // 1. ค้นหาผ่าน Google Drive REST API ซึ่งรองรับ Shared Drives (ไดรฟ์ทีม) 100%
+  try {
+    const token = getFastOAuthToken();
+    if (token && titleWithoutExt) {
+      const q = `name contains '${titleWithoutExt.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}' and mimeType = 'application/vnd.google-apps.presentation' and trashed = false`;
+      const url = `https://www.googleapis.com/drive/v3/files?corpora=allDrives&includeItemsFromAllDrives=true&supportsAllDrives=true&pageSize=10&orderBy=modifiedTime%20desc&fields=files(id,name,mimeType)&q=${encodeURIComponent(q)}`;
+      const res = UrlFetchApp.fetch(url, {
+        method: "get",
+        headers: { "Authorization": "Bearer " + token },
+        muteHttpExceptions: true
+      });
+      if (res.getResponseCode() === 200) {
+        const data = JSON.parse(res.getContentText());
+        if (data && data.files && data.files.length > 0) {
+          const cleanTarget = titleWithoutExt.toLowerCase().trim();
+          let bestFile = data.files[0];
+          for (let f = 0; f < data.files.length; f++) {
+            const fname = (data.files[f].name || "").toLowerCase().trim();
+            if (fname === cleanTarget || fname.replace(/\.(pptx?|pdf)$/i, "").trim() === cleanTarget) {
+              bestFile = data.files[f];
+              break;
+            }
+          }
+          return `https://docs.google.com/presentation/d/${bestFile.id}/edit`;
+        }
+      }
+    }
+  } catch (eApi) {}
+
   try {
     const titleQueries = uniqueNames.map(n => `title = '${n.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`).join(" or ");
     const batchQuery = `(${titleQueries}) and trashed = false`;
@@ -677,17 +706,25 @@ function findDriveFileOrFolderUrl(title) {
   return "";
 }
 
-function resolveBriefSlideUrl(title) {
+function resolveBriefSlideUrl(title, force) {
   if (!title || typeof title !== "string") return "";
   const cleanTitle = title.trim();
   if (!cleanTitle) return "";
 
+  // ถ้าใน title มี fileId หรือเป็น URL ของ Drive/Slides อยู่แล้ว แปลงเป็น presentation edit URL ทันที
+  const dMatch = cleanTitle.match(/\/d\/([-\w]{25,})/i) || cleanTitle.match(/[?&]id=([-\w]{25,})/i);
+  if (dMatch && dMatch[1]) {
+    return `https://docs.google.com/presentation/d/${dMatch[1]}/edit`;
+  }
+
   const scriptCache = CacheService.getScriptCache();
-  const cacheKey = "RESOLVE_BRIEF_SLIDE_V3_" + getSafeB64Key(cleanTitle, 60);
-  try {
-    const cached = scriptCache.get(cacheKey);
-    if (cached) return cached;
-  } catch (e) {}
+  const cacheKey = "RESOLVE_BRIEF_SLIDE_V5_" + getSafeB64Key(cleanTitle, 60);
+  if (!force) {
+    try {
+      const cached = scriptCache.get(cacheKey);
+      if (cached) return cached;
+    } catch (e) {}
+  }
 
   const slideUrl = findDriveFileOrFolderUrl(cleanTitle);
   if (slideUrl) {
@@ -1522,7 +1559,7 @@ function fetchSheetsValuesAndChecksumFast(spreadsheetId, sheetNames) {
 }
 
 /**
- * ดึงเฉพาะข้อมูล Links, Smart Chips และ Notes ของคอลัมน์ F คอลัมน์เดียว (F4:F{maxRow} - ลิงก์อัปงาน TH และ Note INTER)
+ * ดึงข้อมูล Links, Smart Chips และ Notes ของคอลัมน์ D ถึง F (D4:F{maxRow} - ใบบรีฟ และ ลิงก์อัปงาน TH/INTER)
  */
 function fetchSheetsLinksGridDataFast(spreadsheetId, sheetRequests) {
   if (!sheetRequests || sheetRequests.length === 0) return null;
@@ -1531,7 +1568,7 @@ function fetchSheetsLinksGridDataFast(spreadsheetId, sheetRequests) {
 
   if (typeof Sheets !== "undefined" && Sheets && Sheets.Spreadsheets && typeof Sheets.Spreadsheets.get === "function") {
     try {
-      const ranges = sheetRequests.map(req => `'${req.name}'!F${startRow}:F${req.maxRow}`);
+      const ranges = sheetRequests.map(req => `'${req.name}'!D${startRow}:F${req.maxRow}`);
       const res = Sheets.Spreadsheets.get(spreadsheetId, { ranges: ranges, fields: fields });
       if (res && res.sheets) {
         return res;
@@ -1546,7 +1583,7 @@ function fetchSheetsLinksGridDataFast(spreadsheetId, sheetRequests) {
     const chunkSize = 15;
     if (sheetRequests.length <= chunkSize) {
       const rangesParam = sheetRequests
-        .map(req => `ranges=${encodeURIComponent(`'${req.name}'!F${startRow}:F${req.maxRow}`)}`)
+        .map(req => `ranges=${encodeURIComponent(`'${req.name}'!D${startRow}:F${req.maxRow}`)}`)
         .join("&");
       const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?${rangesParam}&fields=${encodeURI(fields)}`;
 
@@ -1566,7 +1603,7 @@ function fetchSheetsLinksGridDataFast(spreadsheetId, sheetRequests) {
       for (let c = 0; c < sheetRequests.length; c += chunkSize) {
         const chunk = sheetRequests.slice(c, c + chunkSize);
         const rangesParam = chunk
-          .map(req => `ranges=${encodeURIComponent(`'${req.name}'!F${startRow}:F${req.maxRow}`)}`)
+          .map(req => `ranges=${encodeURIComponent(`'${req.name}'!D${startRow}:F${req.maxRow}`)}`)
           .join("&");
         const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?${rangesParam}&fields=${encodeURI(fields)}`;
         requests.push({
@@ -1674,6 +1711,13 @@ function extractApiCellInfo(cellObj) {
     }
   }
 
+  if (!link) {
+    const deepUri = extractDeepUriOrId(cellObj);
+    if (deepUri) {
+      link = deepUri;
+    }
+  }
+
   if (!link && title) {
     if (title.startsWith("http://") || title.startsWith("https://")) {
       link = title;
@@ -1702,8 +1746,7 @@ function fastFormatPresentationUrl(rawUrl) {
 }
 
 /**
- * สร้างรายการงานของแผ่นงานจากตารางข้อความดิบ (valuesRows C4:L) ผสานกับข้อมูลลิงก์อัปงาน (colFRowData F4:F)
- * ตัดภาระการแกะ chipRuns ของใบบรีฟ (Col D) ออก 100% เพื่อความเร็วสูงสุด
+ * สร้างรายการงานของแผ่นงานจากตารางข้อความดิบ (valuesRows C4:L) ผสานกับข้อมูลลิงก์อัปงานและใบบรีฟ (colFRowData D4:F)
  */
 function buildSheetTasksFromHybridData(sheetName, valuesRows, colFRowData) {
   const parsedSheetTasks = [];
@@ -1712,6 +1755,7 @@ function buildSheetTasksFromHybridData(sheetName, valuesRows, colFRowData) {
 
   let currentCategory = "";
   let currentBriefTitle = "";
+  let currentBriefLink = "";
 
   for (let rIdx = 0; rIdx < totalRows; rIdx++) {
     const actualRowNumber = CONFIG.DATA_START_ROW + rIdx;
@@ -1725,19 +1769,46 @@ function buildSheetTasksFromHybridData(sheetName, valuesRows, colFRowData) {
       if (newCat !== currentCategory) {
         currentCategory = newCat;
         currentBriefTitle = "";
+        currentBriefLink = "";
       }
     }
 
-    // คอลัมน์ D: เก็บเฉพาะชื่อใบบรีฟจากข้อความดิบ (ไม่ต้องดึง chipRuns ของใบบรีฟ)
+    // แกะข้อมูลคอลัมน์ D (ใบบรีฟ) และ F (ลิงก์อัปงาน)
+    // fVals: เมื่อดึงช่วง D:F
+    // Index 0 = Col D (ใบบรีฟ)
+    // Index 1 = Col E (ผู้รับผิดชอบ)
+    // Index 2 = Col F (ชื่องาน / อัปงาน)
+    let dVal = (fVals && fVals.length >= 1) ? fVals[0] : null;
+    let fVal = (fVals && fVals.length >= 3) ? fVals[2] : null;
+
+    // คอลัมน์ D: ดึงทั้งชื่อและลิงก์จริงของใบบรีฟ (Hyperlink, Smart Chip, Text Run)
     const rawBriefText = (vRow[CONFIG.COL_BRIEF_LINK - COL_OFFSET] || "").toString().trim();
+    let rowBriefTitle = "";
+    let rowBriefLink = "";
+
     if (rawBriefText) {
-      currentBriefTitle = rawBriefText;
+      rowBriefTitle = rawBriefText;
+      if (rawBriefText.startsWith("http://") || rawBriefText.startsWith("https://") || rawBriefText.includes("/d/")) {
+        rowBriefLink = fastFormatPresentationUrl(rawBriefText);
+      }
+    }
+    if (dVal) {
+      const briefInfo = extractApiCellInfo(dVal);
+      if (briefInfo.title) rowBriefTitle = briefInfo.title;
+      if (briefInfo.link) rowBriefLink = fastFormatPresentationUrl(briefInfo.link);
+    }
+
+    // เมื่อพบข้อมูลใบบรีฟใหม่ในแถวนี้ (มีชื่อหรือมีลิงก์ระบุไว้เฉพาะแถวนี้)
+    if (rowBriefTitle || rowBriefLink) {
+      currentBriefTitle = rowBriefTitle || currentBriefTitle;
+      // สำคัญมาก: รีเซ็ต currentBriefLink เป็นลิงก์ของบรีฟใหม่นี้ทันที เพื่อไม่ให้รั่วไหลไปใช้ลิงก์ของบรีฟเก่าก่อนหน้า
+      currentBriefLink = rowBriefLink || "";
     }
 
     // คอลัมน์ E, F, I, J, K, L
     const rowAssignee = (vRow[CONFIG.COL_ASSIGNEE - COL_OFFSET] || "").toString().trim();
     const noVal = vRow[CONFIG.COL_NO - COL_OFFSET] || "";
-    const uploadInfo = extractApiCellInfo(fVals[0]); // คอลัมน์ F คือ Index 0 ใน fVals (เนื่องจากดึงเฉพาะ F4:F)
+    const uploadInfo = extractApiCellInfo(fVal);
     const rawUploadText = (vRow[CONFIG.COL_UPLOAD_LINK - COL_OFFSET] || "").toString().trim();
     const uploadCellText = uploadInfo.title || rawUploadText;
     const status = (vRow[CONFIG.COL_STATUS - COL_OFFSET] || "").toString().trim();
@@ -1768,7 +1839,7 @@ function buildSheetTasksFromHybridData(sheetName, valuesRows, colFRowData) {
       sheetName: sheetName,
       row: actualRowNumber,
       category: currentCategory || "ทั่วไป",
-      briefLink: "",
+      briefLink: currentBriefLink || "",
       briefTitle: currentBriefTitle,
       no: noVal || 1,
       taskName: uploadCellText,
@@ -1888,7 +1959,7 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force, knownHashesJso
       const lastHash = verBatch["LAST_HASH_" + b64Name];
       const ver = verBatch["SHEET_VER_" + b64Name] || "0";
       if (lastHash) {
-        const fKey = "FAST_TASKS_V7_" + b64Name + "_" + lastHash + "_" + ver;
+        const fKey = "FAST_TASKS_V8_" + b64Name + "_" + lastHash + "_" + ver;
         sheetToFastKey[sName] = fKey;
         fastCacheKeys.push(fKey);
       }
@@ -1932,7 +2003,7 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force, knownHashesJso
     const hashVal = (liveChecksums && liveChecksums[sName]) ? liveChecksums[sName] : "";
     const compositeHash = hashVal ? (hashVal + "_" + ver) : "";
     const hashSuffix = compositeHash ? ("_" + compositeHash) : "";
-    const key = "FAST_TASKS_V7_" + b64Name + hashSuffix;
+    const key = "FAST_TASKS_V8_" + b64Name + hashSuffix;
     cacheKeyMap[sName] = key;
     if (compositeHash) {
       sheetCompositeHashMap[sName] = compositeHash;
@@ -1994,19 +2065,21 @@ function getStaffTasks(assignee, targetSheet, pendingOnly, force, knownHashesJso
 
     if (liveValuesMap && liveValuesMap[sName]) {
       const rows = liveValuesMap[sName];
-      let hasAnyUploadTextInSheet = false;
+      let hasAnyLinksInSheet = false;
+      const BRIEF_IDX = CONFIG.COL_BRIEF_LINK - 3; // Index 1 (Col D ใบบรีฟ)
 
       for (let r = 0; r < rows.length; r++) {
         const row = rows[r];
         if (!row) continue;
+        const briefVal = (row[BRIEF_IDX] || "").toString().trim();
         const uploadVal = (row[UPLOAD_IDX] || "").toString().trim();
-        if (uploadVal !== "") {
-          hasAnyUploadTextInSheet = true;
+        if (briefVal !== "" || uploadVal !== "") {
+          hasAnyLinksInSheet = true;
           break;
         }
       }
 
-      if (!hasAnyUploadTextInSheet) {
+      if (!hasAnyLinksInSheet) {
         const builtTasks = buildSheetTasksFromHybridData(sName, rows, []);
         sheetsTasksMap[sName] = builtTasks;
         if (key) {
@@ -2632,7 +2705,8 @@ function doGet(e) {
       data = getStaffTasks(assignee, sheet, pendingOnly, force, knownHashes);
     } else if (action === "resolveBrief") {
       const title = e.parameter.title || "";
-      const slideUrl = resolveBriefSlideUrl(title);
+      const force = e.parameter.force === "true";
+      const slideUrl = resolveBriefSlideUrl(title, force);
       data = { success: true, url: slideUrl };
     } else if (action === "fixSmartChips") {
       const sheetName = e.parameter.sheet || "";
